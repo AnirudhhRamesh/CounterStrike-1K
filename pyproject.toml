@@ -1,0 +1,60 @@
+[project]
+name = "counterstrike-1k-evals"
+version = "1.0.0"
+description = "CounterStrike-1K dataset card, examples, evaluation suite, and DIAMOND training baseline."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "CC-BY-NC-4.0" }
+authors = [
+    { name = "Anirudhh Ramesh" },
+]
+
+dependencies = [
+    # Core dataset loader (from GitHub for now; will move to PyPI later).
+    "counterstrike1k @ git+https://github.com/AnirudhhRamesh/counterstrike1k",
+    "datasets>=3.0.0",
+    "huggingface-hub>=0.24.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "pyarrow>=14.0.0",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "av>=11.0.0",
+    "ipykernel>=6.0.0",
+    "jupyterlab>=4.0.0",
+    "matplotlib>=3.7.0",
+    "pillow>=10.0.0",
+]
+eval = [
+    "av>=11.0.0",
+    "imageio>=2.37.0",
+    "imageio-ffmpeg>=0.6.0",
+    "lpips>=0.1.4",
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "scikit-learn>=1.3.0",
+    "wandb>=0.18.0",
+]
+train = [
+    "torch>=2.1.0",
+    "torchcodec>=0.10.0",
+    "torchvision>=0.16.0",
+    "wandb>=0.18.0",
+    "av>=11.0.0",
+    "imageio>=2.37.0",
+    "imageio-ffmpeg>=0.6.0",
+    "matplotlib>=3.7.0",
+    "pillow>=10.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["cs2_release", "cs2_train"]

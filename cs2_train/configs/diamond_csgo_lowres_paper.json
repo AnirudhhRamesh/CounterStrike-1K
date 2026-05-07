@@ -1,0 +1,100 @@
+{
+  "baseline_name": "DIAMOND-CSGO-lowres-on-CS2-WM",
+  "purpose": "Paper baseline B1: run the upstream DIAMOND-CSGO low-resolution denoiser on CS2-WM with only input/output adapters changed.",
+  "upstream": {
+    "repo": "https://github.com/eloialonso/diamond",
+    "branch": "csgo",
+    "files": {
+      "trainer": "config/trainer.yaml",
+      "agent": "config/agent/csgo.yaml",
+      "env": "config/env/csgo.yaml",
+      "sampler": "config/world_model_env/fast.yaml"
+    },
+    "denoiser_training": {
+      "num_autoregressive_steps": 4,
+      "batch_size": 16,
+      "grad_acc_steps": 8,
+      "lr_warmup_steps": 100,
+      "max_grad_norm": 10.0,
+      "steps_first_epoch": 400,
+      "steps_per_epoch": 400,
+      "num_final_epochs": 600,
+      "total_optimizer_steps": 240000
+    },
+    "denoiser_optimizer": {
+      "lr": 0.0001,
+      "weight_decay": 0.01,
+      "eps": 0.00000001
+    },
+    "sigma_distribution": {
+      "loc": -1.2,
+      "scale": 1.2,
+      "sigma_min": 0.002,
+      "sigma_max": 20
+    },
+    "fast_sampler_next_obs": {
+      "num_steps_denoising": 1,
+      "sigma_min": 0.002,
+      "sigma_max": 5.0,
+      "rho": 7,
+      "order": 1,
+      "s_churn": 0.0,
+      "s_noise": 1.0,
+      "s_cond": 0.005
+    }
+  },
+  "cs2_adapter": {
+    "data_format": "CS2-WM local rendered MP4 + action parquet manifest. WebDataset reader should use the same Batch contract once W3 shards are available.",
+    "input_resolution": [36, 64],
+    "reason_for_resolution": "CS2-WM renders are 16:9 at 640x360; 36x64 preserves aspect ratio for the low-resolution denoiser.",
+    "action_space": "DIAMOND's upstream 51-dim CSGO key/mouse multi-hot is preserved. CS2 12-button schema is mapped to compatible keys/clicks; INSPECT, USE, active_weapon, and health are not consumed by B1."
+  },
+  "train_args": {
+    "preset": "full",
+    "resize": [36, 64],
+    "cond_frames": 4,
+    "num_autoregressive_steps": 4,
+    "stride": 1,
+    "batch_size": 16,
+    "grad_acc": 8,
+    "lr": 0.0001,
+    "weight_decay": 0.01,
+    "lr_warmup": 100,
+    "max_grad_norm": 10.0,
+    "max_steps": 240000,
+    "mixed_precision": "fp32",
+    "scale_loss_by_grad_acc": false,
+    "num_workers": 8,
+    "prefetch_factor": 4,
+    "persistent_workers": true,
+    "log_every": 20,
+    "val_every": 2000,
+    "rollout_every": 10000,
+    "rollout_steps": 16,
+    "val_batch_size": 8,
+    "val_rows": 4,
+    "val_denoise_steps": 1,
+    "val_s_cond": 0.005,
+    "ema_decay": 0.0,
+    "use_ema_for_val": false,
+    "ckpt_every": 10000,
+    "save_latest": true,
+    "wandb_project": "cs2-wm",
+    "wandb_mode": "online",
+    "seed": 0,
+    "device": "cuda"
+  },
+  "evaluation": {
+    "primary_table_metrics": [
+      "denoising_loss",
+      "one_step_mse",
+      "one_step_psnr_db",
+      "rollout_mse_per_step",
+      "rollout_psnr_per_step",
+      "rollout_mse_mean",
+      "rollout_mse_last",
+      "FVD_16_or_32_frame_rollouts_when_cdfvd_is_installed"
+    ],
+    "paper_note": "Do not paste numbers from pilot/multimap manifests into the Dust2 v1 paper table. Use the locked Dust2-only split and dataset version."
+  }
+}
