@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use CounterStrike-1K, please cite the dataset as below."
+type: dataset
+title: "CounterStrike-1K: Synchronized Multi-POV Counter-Strike 2 for World Modeling"
+version: "1.0.0"
+date-released: 2026-05-07
+url: "https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K"
+repository-code: "https://github.com/AnirudhhRamesh/CounterStrike-1K"
+license: "CC-BY-NC-4.0"
+authors:
+  - family-names: "Ramesh"
+    given-names: "Anirudhh"
+keywords:
+  - "counter-strike-2"
+  - "video-world-modeling"
+  - "action-conditioned-video"
+  - "multi-view"
+  - "multi-agent"
+  - "esports"
+  - "audio"
+preferred-citation:
+  type: dataset
+  title: "CounterStrike-1K: Synchronized Multi-POV Counter-Strike 2 for World Modeling"
+  authors:
+    - family-names: "Ramesh"
+      given-names: "Anirudhh"
+  year: 2026
+  publisher:
+    name: "Hugging Face"
+  url: "https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K"
+  version: "1.0.0"
