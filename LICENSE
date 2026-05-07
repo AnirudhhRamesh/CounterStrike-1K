@@ -1,0 +1,29 @@
+CounterStrike-1K Release Artifacts License
+
+Released artifacts (rendered POV video and audio, packed action and state
+sidecars, sparse event sidecars, public metadata, indices, schema files,
+manifests, and aggregate statistics) are provided under the Creative Commons
+Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0) to the
+extent of the authors' rights.
+
+Full license text: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+
+Source code in this repository (Python loader, examples, training utilities)
+is also released under CC BY-NC 4.0 to keep the artifact and tooling licenses
+aligned for non-commercial research.
+
+Counter-Strike 2 and underlying game assets (maps, models, textures, audio,
+engine, and game content) remain the property of Valve Corporation. The
+public artifacts in this release are derived rendered material and do not
+redistribute the underlying game files.
+
+Raw HLTV demo files are not redistributed. Public artifacts contain no Steam
+IDs, online account identifiers, raw HLTV identifiers, profile URLs, player
+names, or chat text. The anonymized identifier pov_idx is only stable within
+a single match.
+
+Out-of-scope uses:
+- Commercial use of the rendered artifacts or derived models
+- Re-identifying players or linking players across matches
+- Recovering Steam IDs or online accounts
+- Player profiling, ranking, anti-cheat, or surveillance use cases
