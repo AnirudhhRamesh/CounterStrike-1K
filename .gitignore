@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+.uv/
+dist/
+build/
+*.egg-info/
+runs/
+cs2_release/runs/
+cs2_train/data/
+cs2_train/runs/
+cs2_train/checkpoints/
