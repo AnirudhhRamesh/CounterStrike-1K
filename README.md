@@ -102,12 +102,42 @@ print(len(manifest), "POV samples")
 mirage_train = manifest[(manifest["map_slug"] == "mirage") & (manifest["split"] == "train")]
 ```
 
-**Pull a bandwidth-friendly subset** (10 / 50 / 100 / 500 / 1000 hours, or `dust2_100h`):
+**Pull the filtered examples** from the 360p shards:
 
 ```python
-ten_hours = pd.read_parquet(hf_hub_download(
-    "ArnieRamesh/CounterStrike-1K", "subsets/train_10h.parquet", repo_type="dataset",
+from datasets import Video, load_dataset
+from counterstrike1k import decode_sample
+
+keep = set(mirage_train["sample_key"].astype(str))
+sample_index = pd.read_parquet(hf_hub_download(
+    "ArnieRamesh/CounterStrike-1K", "sample_index_360p.parquet", repo_type="dataset",
 ))
+shard_paths = sorted(sample_index[
+    (sample_index["sample_key"].isin(keep)) & (sample_index["member_suffix"] == "mp4")
+]["shard_path"].unique())
+
+shards = load_dataset(
+    "ArnieRamesh/CounterStrike-1K-360-wds",
+    data_files={"train": shard_paths},
+    split="train",
+    streaming=True,
+).cast_column("mp4", Video(decode=False))
+
+for raw in shards:
+    if raw["__key__"] not in keep:
+        continue
+    sample = decode_sample(raw)
+    # train or inspect sample["video"], sample["actions"], sample["state"]
+```
+
+**Pull a bandwidth-friendly subset** by tag:
+
+```python
+subset_tag = "dust2_100h"  # also: "train_10h", "train_50h", "train_100h", ...
+subset = pd.read_parquet(hf_hub_download(
+    "ArnieRamesh/CounterStrike-1K", f"subsets/{subset_tag}.parquet", repo_type="dataset",
+))
+subset_manifest = manifest[manifest["sample_key"].isin(subset["sample_key"])]
 ```
 
 **Stream training data without downloading the full 1.3 TB**:
@@ -167,7 +197,7 @@ Full schema lives at the [`schema/` folder on HF](https://huggingface.co/dataset
 | test  | 74.55 | 20 | 391 | 3,910 |
 | **total** | **1,490.82** | **342** | **7,347** | **73,470** |
 
-Split unit is the **match-map demo**, so the same match never appears in two splits. Bandwidth-friendly subsets (`train_10h`, `train_50h`, `train_100h`, `train_500h`, `train_1000h`, `train_all`, `dust2_100h`, `full_demo_eval`) are precomputed parquet files of `sample_key`s.
+Split unit is the **match-map demo**, so the same match never appears in two splits. Bandwidth-friendly subset tags (`train_10h`, `train_50h`, `train_100h`, `train_500h`, `train_1000h`, `train_all`, `dust2_100h`, `full_demo_eval`) map to `subsets/{subset_tag}.parquet` files of `sample_key`s.
 
 ---
 
