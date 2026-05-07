@@ -1,6 +1,13 @@
 # CounterStrike-1K
 
-**Synchronized 10-POV Counter-Strike 2 dataset for video world modeling, action-conditioned video prediction, and multi-view consistency research.** NeurIPS 2026 Evaluations & Datasets submission.
+**Synchronized 10-POV Counter-Strike 2 dataset for video world modeling, action-conditioned video prediction, and multi-view consistency research.**
+
+<p align="center">
+  <a href="https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K"><img alt="Dataset" src="https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-CounterStrike--1K-blue"></a>
+  <a href="https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K-sample"><img alt="Preview" src="https://img.shields.io/badge/%F0%9F%A4%97%20Preview-2GB-yellow"></a>
+  <a href="https://github.com/AnirudhhRamesh/counterstrike1k"><img alt="Loader" src="https://img.shields.io/badge/Loader-counterstrike1k-green"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey"></a>
+</p>
 
 <p align="center">
   <img src="media/introduction_video_wall_1000_hours.gif" alt="100+ POV video wall — 1,000+ hours of professional play" width="100%"/>
@@ -19,13 +26,6 @@
 <p align="center">
   <img src="media/seven_maps.gif" alt="Ancient · Anubis · Dust2 · Inferno · Mirage · Nuke · Overpass" width="100%"/><br/>
   <sub>Ancient · Anubis · Dust2 · Inferno · Mirage · Nuke · Overpass</sub>
-</p>
-
-<p align="center">
-  <a href="https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K"><img alt="Dataset" src="https://img.shields.io/badge/%F0%9F%A4%97%20Dataset-CounterStrike--1K-blue"></a>
-  <a href="https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K-sample"><img alt="Preview" src="https://img.shields.io/badge/%F0%9F%A4%97%20Preview-2GB-yellow"></a>
-  <a href="https://github.com/AnirudhhRamesh/counterstrike1k"><img alt="Loader" src="https://img.shields.io/badge/Loader-counterstrike1k-green"></a>
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey"></a>
 </p>
 
 This repository ships the **evaluation suite** (`cs2_release/`) and **DIAMOND-style training baseline** (`cs2_train/`). The Python loader lives in [`AnirudhhRamesh/counterstrike1k`](https://github.com/AnirudhhRamesh/counterstrike1k); the dataset itself is on [Hugging Face](https://huggingface.co/datasets/ArnieRamesh/CounterStrike-1K).
