@@ -38,7 +38,16 @@ git status --short > "${RUN_ROOT}/provenance/git_status.txt"
 sha256sum "${CONFIG}" "${MANIFEST}" "${PROVENANCE}" > "${RUN_ROOT}/provenance/input_sha256.txt"
 cp "${CONFIG}" "${RUN_ROOT}/provenance/config.json"
 cp "${PROVENANCE}" "${RUN_ROOT}/provenance/dataset_provenance.json"
-"${PYTHON_BIN}" -m pip freeze --all > "${RUN_ROOT}/provenance/python_environment.txt"
+"${PYTHON_BIN}" - <<'PY' > "${RUN_ROOT}/provenance/python_environment.txt"
+from importlib.metadata import distributions
+
+packages = {
+    f"{distribution.metadata['Name']}=={distribution.version}"
+    for distribution in distributions()
+    if distribution.metadata["Name"]
+}
+print("\n".join(sorted(packages, key=str.casefold)))
+PY
 "${PYTHON_BIN}" - <<'PY' > "${RUN_ROOT}/provenance/torch_environment.json"
 import json
 import platform
