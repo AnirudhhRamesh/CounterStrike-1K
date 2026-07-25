@@ -65,6 +65,18 @@ Run the checked launcher from a clean checkout:
 bash cs2_train/scripts/run_diamond_cs1k_dust2_rebuttal_v1.sh
 ```
 
+The held-out evaluator can also write a hashed model-agnostic rollout archive
+with `--save-rollout-archive`. Score its paired camera/scene motion with:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_motion \
+  --archive-dir /path/to/evaluation/rollout_archive
+```
+
+This fixed-RAFT endpoint complements rather than replaces the frozen pixel-MSE
+endpoint. The protocol documents its world-view crop, weight hash, bootstrap
+unit, limitations, and the follow-on MIRA-style action/state probes.
+
 This is separate from the historical Table 11 reproduction below.
 
 ## Paper Table 11 reproduction

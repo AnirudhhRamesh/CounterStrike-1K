@@ -35,6 +35,7 @@ for path in (THIS_DIR.parents[1], THIS_DIR.parent):
 
 from .dataset import CSDataset, collate_diamond
 from .diamond import Batch, Denoiser
+from .rollout_archive import RolloutArchiveWriter
 from .train import PRESETS, build_denoiser, load_config_defaults
 from .visualize import rollout_autoregressive, rollout_one_step
 
@@ -384,6 +385,14 @@ def main() -> None:
         ),
     )
     parser.add_argument("--max-review-videos", type=int, default=24)
+    parser.add_argument(
+        "--save-rollout-archive",
+        action="store_true",
+        help=(
+            "Retain paired uint8 predictions, ground truth, validity masks, and "
+            "conditioned action streams for model-agnostic dynamics metrics."
+        ),
+    )
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 
@@ -460,9 +469,16 @@ def main() -> None:
     num_samples = len(selected_indices)
     infos: list[dict] = []
     action_windows: list[torch.Tensor] = []
+    raw_action_windows: list[torch.Tensor] = []
     for dataset_index in selected_indices:
         actions, info = dataset.action_window_at(dataset_index)
+        raw_actions, raw_info = dataset.raw_action_window_at(dataset_index)
+        if raw_info != info:
+            raise ValueError(
+                f"{info['sample_key']}: raw and encoded action provenance differ"
+            )
         action_windows.append(actions)
+        raw_action_windows.append(raw_actions)
         infos.append(info)
     donors = build_cross_round_donors(infos, seed=args.eval_seeds[0] + 90_001)
     donor_actions = [action_windows[donor] for donor in donors]
@@ -496,6 +512,20 @@ def main() -> None:
         collate_fn=collate_diamond,
     )
 
+    archive_writer = None
+    if args.save_rollout_archive:
+        archive_writer = RolloutArchiveWriter(
+            args.out_dir / "rollout_archive",
+            num_samples=num_samples,
+            eval_seeds=args.eval_seeds,
+            action_modes=args.action_modes,
+            rollout_steps=args.rollout_steps,
+            height=int(preset["resize"][0]),
+            width=int(preset["resize"][1]),
+            num_model_actions=int(action_windows[0].shape[-1]),
+            num_cs2_actions=int(raw_action_windows[0].shape[-1]),
+        )
+
     rows: list[dict] = []
     review_manifest: list[dict] = []
     review_count = 0
@@ -508,6 +538,12 @@ def main() -> None:
         ]
         shuffled_actions = torch.stack(
             [donor_actions[position] for position in positions],
+        ).to(device)
+        true_raw_actions = torch.stack(
+            [raw_action_windows[position] for position in positions],
+        ).to(device)
+        shuffled_raw_actions = torch.stack(
+            [raw_action_windows[donors[position]] for position in positions],
         ).to(device)
         modes: dict[str, Batch] = {
             "true": batch,
@@ -534,9 +570,26 @@ def main() -> None:
                 [{**info, "action_source_dataset_index": None} for info in batch.info],
             ),
         }
+        raw_actions_by_mode = {
+            "true": true_raw_actions,
+            "shuffled": shuffled_raw_actions,
+            "zeros": torch.zeros_like(true_raw_actions),
+        }
         predictions_for_review: dict[str, torch.Tensor] = {}
-        for eval_seed in args.eval_seeds:
-            for mode in args.action_modes:
+        valid_steps = np.asarray(
+            [
+                [
+                    int(source_frame) < int(infos[position]["alive_end_frame"])
+                    for source_frame in infos[position]["source_frame_indices"][
+                        n_cond : n_cond + args.rollout_steps
+                    ]
+                ]
+                for position in positions
+            ],
+            dtype=np.bool_,
+        )
+        for seed_index, eval_seed in enumerate(args.eval_seeds):
+            for mode_index, mode in enumerate(args.action_modes):
                 mode_batch = modes[mode]
                 rng_base = eval_seed * 1_000_003 + batch_index * 101
                 reset_rng(rng_base + 1, device)
@@ -564,6 +617,22 @@ def main() -> None:
                 )
                 ground_truth = mode_batch.obs[:, n_cond : n_cond + args.rollout_steps]
                 rollout_mse_steps = ((rollout - ground_truth) ** 2).mean((2, 3, 4))
+                if archive_writer is not None:
+                    archive_writer.write_batch(
+                        seed_index=seed_index,
+                        mode_index=mode_index,
+                        sample_positions=positions,
+                        predictions=rollout,
+                        ground_truth=ground_truth,
+                        context_last=mode_batch.obs[:, n_cond - 1],
+                        conditioning_actions_model=mode_batch.act[
+                            :, n_cond - 1 : n_cond - 1 + args.rollout_steps
+                        ],
+                        conditioning_actions_cs2=raw_actions_by_mode[mode][
+                            :, n_cond - 1 : n_cond - 1 + args.rollout_steps
+                        ],
+                        valid_steps=valid_steps,
+                    )
 
                 if eval_seed == args.eval_seeds[0]:
                     predictions_for_review[mode] = rollout.detach().cpu()
@@ -661,6 +730,53 @@ def main() -> None:
         json.dumps(review_manifest, indent=2),
         encoding="utf-8",
     )
+    archive_metadata_path = None
+    if archive_writer is not None:
+        archive_metadata_path = archive_writer.finalize(
+            contract={
+                "checkpoint_sha256": sha256_file(args.checkpoint),
+                "checkpoint_step": int(checkpoint.get("step", -1)),
+                "config_sha256": sha256_file(args.config) if args.config else None,
+                "manifest_sha256": sha256_file(
+                    args.data_dir / args.manifest_name
+                ),
+                "split": args.split,
+                "map_slug": args.map_slug,
+                "window_mode": args.window_mode,
+                "target_fps": int(getattr(model_args, "target_fps", 8)),
+                "sample_plan_sha256": sha256_file(sample_plan_path),
+                "action_plan_sha256": sha256_json(
+                    [
+                        {
+                            "target": info["sample_key"],
+                            "donor": infos[donors[idx]]["sample_key"],
+                        }
+                        for idx, info in enumerate(infos)
+                    ]
+                ),
+                "transition_action_indices": (
+                    "n_cond-1 through n_cond-1+rollout_steps; "
+                    "action[i] conditions obs[i]->obs[i+1]"
+                ),
+                "cs2_action_schema": [
+                    "FORWARD",
+                    "BACK",
+                    "LEFT",
+                    "RIGHT",
+                    "JUMP",
+                    "DUCK",
+                    "WALK",
+                    "FIRE",
+                    "RIGHTCLICK",
+                    "RELOAD",
+                    "INSPECT",
+                    "USE",
+                    "delta_pitch",
+                    "delta_yaw",
+                ],
+                "model_unmapped_cs2_actions": ["INSPECT", "USE"],
+            }
+        )
 
     means = {}
     for mode in args.action_modes:
@@ -722,6 +838,9 @@ def main() -> None:
         },
         "review_manifest": str(args.out_dir / "review_manifest.json"),
         "per_sample_metrics": str(rows_path),
+        "rollout_archive": (
+            str(archive_metadata_path) if archive_metadata_path is not None else None
+        ),
     }
     summary_path = args.out_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")

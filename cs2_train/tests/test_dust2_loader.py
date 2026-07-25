@@ -101,6 +101,11 @@ def test_32_to_8_fps_actions_are_interval_aggregated(tmp_path: Path) -> None:
     # Observation 4 -> observation 8 uses action rows 5..8.
     assert sample["actions"][1, 12:].tolist() == [26.0, 52.0]
     assert sample["actions"][1, :12].sum().item() == 0
+    raw_actions, raw_info = dataset.raw_action_window_at(0)
+    encoded_actions, encoded_info = dataset.action_window_at(0)
+    assert torch.equal(raw_actions, sample["actions"])
+    assert raw_info == encoded_info
+    assert encoded_actions.shape == (2, 51)
 
 
 def test_midpoint_and_first_death_share_start_across_povs(tmp_path: Path) -> None:

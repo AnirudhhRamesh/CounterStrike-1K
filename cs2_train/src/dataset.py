@@ -764,21 +764,13 @@ class CSDataset(Dataset):
         mouse = windows[:, :, len(BUTTON_COLS) :].sum(axis=1)
         return np.concatenate((buttons, mouse), axis=1).astype(np.float32, copy=False)
 
-    def action_window_at(self, global_idx: int) -> tuple[torch.Tensor, dict]:
-        """Load only the encoded action window and provenance for an index.
-
-        Confirmatory action-shuffle evaluation uses this path for donor actions
-        so it does not decode donor videos a second time.
-        """
+    def raw_action_window_at(self, global_idx: int) -> tuple[torch.Tensor, dict]:
+        """Load the canonical 12-button + 2-mouse action window and provenance."""
 
         clip, local_start, frame_ids = self._resolve_window(global_idx)
         dense = self._get_actions_dense(clip)
         aggregated = self._aggregate_actions(dense, local_start)
-        encoded = encode_cs2_actions(
-            aggregated[:, : len(BUTTON_COLS)],
-            aggregated[:, len(BUTTON_COLS) :],
-        )
-        return torch.from_numpy(encoded), {
+        return torch.from_numpy(aggregated), {
             "sample_key": str(clip.get("sample_key", "")),
             "match_id": str(clip["match_id"]),
             "round_id": str(clip.get("round_id", "")),
@@ -800,6 +792,20 @@ class CSDataset(Dataset):
             "window_mode": self.window_mode,
             "dataset_index": int(global_idx),
         }
+
+    def action_window_at(self, global_idx: int) -> tuple[torch.Tensor, dict]:
+        """Load only the encoded action window and provenance for an index.
+
+        Confirmatory action-shuffle evaluation uses this path for donor actions
+        so it does not decode donor videos a second time.
+        """
+
+        raw, info = self.raw_action_window_at(global_idx)
+        encoded = encode_cs2_actions(
+            raw[:, : len(BUTTON_COLS)].numpy(),
+            raw[:, len(BUTTON_COLS) :].numpy(),
+        )
+        return torch.from_numpy(encoded), info
 
     # ---- entry points --------------------------------------------------------
 

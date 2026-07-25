@@ -178,6 +178,54 @@ The primary sensitivity contrast is:
 A positive value means that correct actions improve prediction. The zero-action
 contrast is reported as a secondary diagnostic.
 
+### Pre-test dynamics-metric amendment
+
+On 2026-07-25, before any held-out test evaluation and before the first
+numbered training checkpoint, qualitative validation review showed that pixel
+MSE can obscure correct action-conditioned camera motion when the generated
+frame is blurry or slightly misregistered. The original MSE endpoint above is
+retained and cannot be replaced. The following secondary endpoints are added
+before test access, following the separation used by the MIRA technical
+report between visual quality, physical-state recovery, and action
+recoverability:
+
+1. **Camera/motion dynamics agreement.** A fixed torchvision RAFT-Small
+   `C_T_V2` model estimates adjacent optical flow for the generated and
+   ground-truth rollout. Inputs are resized from the model-native 36 x 64
+   output to 128 x 224 with bilinear interpolation and no antialiasing, as in
+   the torchvision inference recipe. The scorer measures dense endpoint error
+   and robust median global-flow endpoint error, normalized by the resized
+   image diagonal. It scores the normalized crop `y=[0.10,0.68]`,
+   `x=[0.04,0.96]` to remove most static HUD and first-person weapon pixels.
+   Post-alive steps use the same mask as MSE. The fixed weights SHA-256 is
+   `01064c6dba73b0fc9fc8edf772248560a00a3acfd62ac6677e9eeebad9680e27`.
+2. **CS2 Action Recoverability Ratio (ARR).** A frozen visual backbone plus
+   temporal probe is trained on real train windows and selected only on
+   validation. It detects the action stream from generated motion and divides
+   generated average precision by the corresponding model-native real-video
+   ceiling. Button and signed mouse-look scores are reported separately; the
+   common-action macro excludes `INSPECT` and `USE`, which the upstream
+   DIAMOND 51-dimensional action space cannot represent.
+3. **State/dynamics probe.** A shared real-video probe recovers camera
+   yaw/pitch, player position, active weapon, and ammo from generated
+   trajectories. This covers state changes that optical flow cannot, while
+   keeping the evaluator common across DIAMOND, NanoWM, and MIRA-single.
+
+RAFT measures camera and visible scene motion, not all game physics: muzzle
+flashes, firing, reloads, and weapon switches require ARR/state/event metrics.
+SSIM and LPIPS remain appearance diagnostics. Frame FID ignores time, while
+FVD/FDD measure marginal temporal realism rather than whether the requested
+action produced the correct paired transition; they may be reported as
+secondary quality metrics but are not substitutes for controllability.
+
+The expensive sampler is replayed once from the frozen final checkpoints with
+`--save-rollout-archive`. It atomically retains standard NumPy arrays for every
+seed x action mode x sample: last context frame, generated and ground-truth
+future, alive mask, actual 51-D model input, and canonical 14-D CS2 action
+stream. Every array is hashed and `metadata.json` is written last as the
+completion marker. The replay MSE and sample/action-plan hashes must match the
+original confirmatory evaluation before any new metric is accepted.
+
 ## Reproduction
 
 Install and test:
@@ -207,6 +255,25 @@ runs the target-frame action-alignment audit, and records the code commit,
 config, package environment, CUDA/PyTorch environment, full `nvidia-smi -q`,
 exact commands, logs, metrics, checkpoints, sample plans, and evaluator
 outputs.
+
+To retain a model-agnostic rollout archive during the analysis replay, append:
+
+```bash
+--save-rollout-archive
+```
+
+Then compute the optical-flow endpoint:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_motion \
+  --archive-dir /runs/diamond-cs1k-dust2-360p-rebuttal-v1/true/evaluation/midpoint-dynamics/rollout_archive \
+  --bootstrap-replicates 10000
+```
+
+The scorer verifies every archive hash before loading it, records the
+torch/torchvision weight provenance, retains per-sample/per-step metrics, and
+uses the same round-clustered paired bootstrap convention as the pixel
+endpoint.
 
 ## Final audit and private review publication
 
