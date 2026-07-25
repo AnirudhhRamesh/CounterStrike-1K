@@ -614,6 +614,7 @@ def main() -> None:
             "Private review publishing enabled: "
             f"{args.review_s3_uri.rstrip('/')}/{review_publisher.run_id}"
         )
+        review_publisher.mark_running()
 
     preset = dict(PRESETS[args.preset])
     if args.resize is not None:

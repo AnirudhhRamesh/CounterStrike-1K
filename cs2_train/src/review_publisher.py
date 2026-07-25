@@ -152,6 +152,34 @@ class ReviewPublisher:
         )
         return index_url
 
+    def mark_running(self) -> str:
+        """Create the private index immediately, before the first eval step."""
+
+        index = self._read_index()
+        arm_payload = index.setdefault("arms", {}).setdefault(
+            self.arm,
+            {"events": []},
+        )
+        arm_payload["status"] = "running"
+        arm_payload.setdefault("started_at_utc", datetime.now(UTC).isoformat())
+        index["updated_at_utc"] = datetime.now(UTC).isoformat()
+        encoded = json.dumps(index, indent=2).encode()
+        self.local_index.write_bytes(encoded)
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=self.index_key,
+            Body=encoded,
+            ContentType="application/json",
+            ServerSideEncryption="AES256",
+            CacheControl="no-store",
+        )
+        index_url = self._presign(self.index_key)
+        (self.local_dir / "review_index_url.txt").write_text(
+            index_url + "\n",
+            encoding="utf-8",
+        )
+        return index_url
+
     def mark_complete(self, *, final_step: int) -> str:
         index = self._read_index()
         arm_payload = index.setdefault("arms", {}).setdefault(
