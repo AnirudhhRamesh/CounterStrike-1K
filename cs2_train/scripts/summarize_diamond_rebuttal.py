@@ -18,7 +18,7 @@ METRICS = (
 WINDOW_MODES = ("midpoint", "first-death")
 TRAINING_ARMS = ("true", "shuffled")
 ACTION_MODES = ("true", "shuffled", "zeros")
-TRAINING_COMMIT = "a5566a05292088b0a5ac108388f90d074890d278"
+TRAINING_COMMIT = "34524f6b6f1f805200d72ab4e77f3a55dd6415f8"
 
 
 def load_jsonl(path: Path) -> list[dict]:

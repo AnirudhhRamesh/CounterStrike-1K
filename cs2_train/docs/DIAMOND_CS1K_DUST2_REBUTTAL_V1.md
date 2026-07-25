@@ -4,6 +4,9 @@ This protocol supersedes the earlier pilot comparison for the rebuttal. It is
 frozen before confirmatory training in
 `configs/diamond_cs1k_dust2_360p_rebuttal_v1.json`.
 
+The corrected production training/evaluation code is frozen at
+`34524f6b6f1f805200d72ab4e77f3a55dd6415f8`.
+
 ## Question and endpoint
 
 The experiment asks whether the DIAMOND-CSGO world model uses aligned player
