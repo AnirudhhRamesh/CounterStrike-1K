@@ -161,3 +161,39 @@ def test_release_target_alignment_audit(tmp_path: Path) -> None:
     )
     assert result["passed"]
     assert result["transitions_checked"] == 10
+
+
+def test_sliding_training_excludes_post_death_camera_tail(tmp_path: Path) -> None:
+    row = _row("sample", round_id="round", pov_idx=0)
+    row["alive_end_frame"] = 33
+    _write_release(tmp_path, [row])
+    dataset = CSDataset(
+        tmp_path,
+        split="test",
+        T=2,
+        target_fps=8,
+        manifest_name="confirmatory.parquet",
+        mode="diamond",
+        window_mode="sliding",
+    )
+    assert dataset.samples[0]["num_frames"] == 33
+    assert len(dataset) == 25
+
+
+def test_alignment_audit_reports_but_excludes_post_alive_camera_motion(
+    tmp_path: Path,
+) -> None:
+    _write_release(tmp_path, [_row("sample", round_id="round", pov_idx=0)])
+    state_path = tmp_path / "state" / "sample.state.bin"
+    state = np.fromfile(state_path, dtype=STATE_DTYPE)
+    state["yaw"][35:] += 10
+    state.tofile(state_path)
+    result = audit_sample(
+        tmp_path,
+        "sample",
+        source_stride=4,
+        tolerance=1e-4,
+        valid_end_frame=33,
+    )
+    assert result["passed"]
+    assert result["post_valid_step_mismatches"] > 0

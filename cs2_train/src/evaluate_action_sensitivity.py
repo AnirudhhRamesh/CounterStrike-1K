@@ -62,6 +62,39 @@ def psnr_from_mse(mse: float) -> float:
     return 20.0 * math.log10(2.0) - 10.0 * math.log10(max(mse, 1e-12))
 
 
+def summarize_valid_rollout(
+    mse_per_step: list[float],
+    *,
+    target_source_frames: list[int],
+    alive_end_frame: int,
+) -> dict:
+    """Mask targets after the POV stops being player-controlled."""
+
+    if len(mse_per_step) != len(target_source_frames):
+        raise ValueError("rollout metrics and target frames have different lengths")
+    valid = [
+        int(source_frame) < int(alive_end_frame)
+        for source_frame in target_source_frames
+    ]
+    valid_values = [
+        float(value)
+        for value, is_valid in zip(mse_per_step, valid, strict=True)
+        if is_valid
+    ]
+    if not valid_values:
+        raise ValueError("rollout has no player-controlled target frames")
+    return {
+        "mse_per_step": [
+            float(value) if is_valid else None
+            for value, is_valid in zip(mse_per_step, valid, strict=True)
+        ],
+        "valid_steps": valid,
+        "valid_count": len(valid_values),
+        "mean": float(np.mean(valid_values)),
+        "last": float(valid_values[-1]),
+    }
+
+
 def replace_actions(batch: Batch, actions: torch.Tensor, info: list[dict]) -> Batch:
     return replace(batch, act=actions, info=info)
 
@@ -538,9 +571,21 @@ def main() -> None:
                     zip(dataset_indices, positions, strict=True)
                 ):
                     info = infos[position]
-                    rollout_values = (
+                    rollout_values_raw = (
                         rollout_mse_steps[row_idx].detach().float().cpu().tolist()
                     )
+                    target_source_frames = info["source_frame_indices"][
+                        n_cond : n_cond + args.rollout_steps
+                    ]
+                    rollout_metrics = summarize_valid_rollout(
+                        rollout_values_raw,
+                        target_source_frames=target_source_frames,
+                        alive_end_frame=int(info["alive_end_frame"]),
+                    )
+                    if int(target_source_frames[0]) >= int(info["alive_end_frame"]):
+                        raise ValueError(
+                            f"{info['sample_key']}: one-step target is post-alive"
+                        )
                     rows.append(
                         {
                             "eval_seed": eval_seed,
@@ -564,9 +609,12 @@ def main() -> None:
                             "one_step_psnr_db": psnr_from_mse(
                                 float(one_step_mse[row_idx].item())
                             ),
-                            "rollout_mse_per_step": rollout_values,
-                            "rollout_mse_mean": float(np.mean(rollout_values)),
-                            "rollout_mse_last": float(rollout_values[-1]),
+                            "rollout_target_source_frames": target_source_frames,
+                            "rollout_valid_steps": rollout_metrics["valid_steps"],
+                            "rollout_valid_count": rollout_metrics["valid_count"],
+                            "rollout_mse_per_step": rollout_metrics["mse_per_step"],
+                            "rollout_mse_mean": rollout_metrics["mean"],
+                            "rollout_mse_last": rollout_metrics["last"],
                         }
                     )
 
@@ -628,7 +676,7 @@ def main() -> None:
             )
         }
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
         "checkpoint": str(args.checkpoint),
         "checkpoint_sha256": sha256_file(args.checkpoint),
         "checkpoint_step": int(checkpoint.get("step", -1)),
@@ -644,6 +692,7 @@ def main() -> None:
         "pov_idx_filter": args.pov_idx,
         "resize": list(preset["resize"]),
         "rollout_steps": args.rollout_steps,
+        "rollout_target_masking": "source_frame < alive_end_frame",
         "num_denoising_steps": denoising_steps,
         "s_cond": s_cond,
         "eval_seeds": args.eval_seeds,

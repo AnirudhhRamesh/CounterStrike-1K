@@ -97,6 +97,7 @@ def validate_contract(
         "target_fps",
         "resize",
         "rollout_steps",
+        "rollout_target_masking",
         "num_denoising_steps",
         "s_cond",
         "eval_seeds",

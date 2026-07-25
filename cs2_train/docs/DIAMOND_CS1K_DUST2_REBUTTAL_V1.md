@@ -51,6 +51,9 @@ uses the same optimized torchcodec decode path and action contract as the
 - for an emitted observation at source frame `t`, buttons are ORed and mouse
   deltas summed over source action rows `t+1` through `t+4` (inclusive), which
   exactly describes the transition to the next observation at `t+4`;
+- sliding training and midpoint validation stop at `alive_end_frame`; the
+  rendered post-death camera tail is not player-controlled and is not part of
+  the aligned-action training hours;
 - resize after decode with antialiased bilinear interpolation.
 
 The DIAMOND adapter then maps the 12 buttons and two angular deltas to the
@@ -60,7 +63,8 @@ Before either arm starts, `audit_cs1k_action_alignment.py` checks a
 deterministic train/validation/test panel. It requires action and state ticks
 to match, verifies `action[i].mouse == state[i] - state[i-1]`, and verifies
 that each four-row aggregate equals the corresponding 8-fps state transition.
-The machine-readable result is retained in
+The audit is enforced over the released alive interval and separately reports
+post-alive camera/action mismatches. The machine-readable result is retained in
 `provenance/action_alignment_audit.json`.
 
 To reproduce that direct layout from public WebDataset shards, use the checked
@@ -120,6 +124,11 @@ on all 690 test POV rows at:
 
 - one fixed midpoint window per POV;
 - one round-shared window centered on the round's first death.
+
+The first-death stress window retains post-death frames in qualitative review
+videos, but quantitative rollout targets at or beyond a POV's
+`alive_end_frame` are masked. One-step targets remain pre-death for all rows.
+Thus camera motion after control has ended cannot dilute the action contrast.
 
 For each window, action modes `true`, `shuffled`, and `zeros` are evaluated at
 seeds 37, 41, and 43. The held-out shuffle maps every target to the same POV

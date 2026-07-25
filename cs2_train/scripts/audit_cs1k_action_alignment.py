@@ -44,6 +44,7 @@ def audit_sample(
     *,
     source_stride: int,
     tolerance: float,
+    valid_end_frame: int | None = None,
 ) -> dict:
     actions_path = data_dir / "actions" / f"{sample_key}.actions.bin"
     state_path = data_dir / "state" / f"{sample_key}.state.bin"
@@ -60,18 +61,28 @@ def audit_sample(
     if not np.array_equal(actions["tick"], state["tick"]):
         raise ValueError(f"{sample_key}: action and state ticks differ")
 
+    valid_end = (
+        len(actions)
+        if valid_end_frame is None
+        else min(len(actions), int(valid_end_frame))
+    )
+    if valid_end <= source_stride:
+        raise ValueError(
+            f"{sample_key}: valid interval has only {valid_end} frames; "
+            f"need > {source_stride}"
+        )
     pitch_step_error = (
-        actions["delta_pitch"][1:].astype(np.float64)
-        - np.diff(state["pitch"].astype(np.float64))
+        actions["delta_pitch"][1:valid_end].astype(np.float64)
+        - np.diff(state["pitch"][:valid_end].astype(np.float64))
     )
     yaw_step_error = _wrapped_degrees(
-        actions["delta_yaw"][1:].astype(np.float64)
-        - _wrapped_degrees(np.diff(state["yaw"].astype(np.float64)))
+        actions["delta_yaw"][1:valid_end].astype(np.float64)
+        - _wrapped_degrees(np.diff(state["yaw"][:valid_end].astype(np.float64)))
     )
 
     # Verify the exact transition consumed by the 32->8 fps DIAMOND adapter:
     # observation t -- actions[t+1:t+stride+1] --> observation t+stride.
-    starts = np.arange(0, len(actions) - source_stride, source_stride)
+    starts = np.arange(0, valid_end - source_stride, source_stride)
     pitch_interval = np.asarray(
         [
             actions["delta_pitch"][start + 1 : start + source_stride + 1].sum(
@@ -99,6 +110,25 @@ def audit_sample(
     pitch_interval_error = pitch_interval - pitch_transition
     yaw_interval_error = _wrapped_degrees(yaw_interval - yaw_transition)
 
+    post_valid_mismatches = 0
+    if valid_end < len(actions):
+        post_pitch_error = (
+            actions["delta_pitch"][valid_end:].astype(np.float64)
+            - np.diff(state["pitch"][valid_end - 1 :].astype(np.float64))
+        )
+        post_yaw_error = _wrapped_degrees(
+            actions["delta_yaw"][valid_end:].astype(np.float64)
+            - _wrapped_degrees(
+                np.diff(state["yaw"][valid_end - 1 :].astype(np.float64))
+            )
+        )
+        post_valid_mismatches = int(
+            np.count_nonzero(
+                (np.abs(post_pitch_error) > tolerance)
+                | (np.abs(post_yaw_error) > tolerance)
+            )
+        )
+
     maxima = {
         "step_pitch_max_abs_error": _max_abs(pitch_step_error),
         "step_yaw_max_abs_error": _max_abs(yaw_step_error),
@@ -108,6 +138,9 @@ def audit_sample(
     return {
         "sample_key": sample_key,
         "frames": len(actions),
+        "valid_end_frame_exclusive": valid_end,
+        "post_valid_frames": len(actions) - valid_end,
+        "post_valid_step_mismatches": post_valid_mismatches,
         "transitions_checked": len(starts),
         **maxima,
         "passed": all(value <= tolerance for value in maxima.values()),
@@ -123,6 +156,7 @@ def main() -> None:
     parser.add_argument("--source-fps", type=int, default=32)
     parser.add_argument("--target-fps", type=int, default=8)
     parser.add_argument("--max-samples-per-split", type=int, default=8)
+    parser.add_argument("--splits", nargs="+", default=["train", "val", "test"])
     parser.add_argument("--tolerance", type=float, default=1e-4)
     args = parser.parse_args()
 
@@ -133,6 +167,9 @@ def main() -> None:
     manifest = pd.read_parquet(manifest_path)
     manifest = manifest[
         manifest["map_slug"].astype(str) == str(args.map_slug)
+    ].copy()
+    manifest = manifest[
+        manifest["split"].astype(str).isin([str(split) for split in args.splits])
     ].copy()
     if manifest.empty:
         raise ValueError(f"{manifest_path}: no map_slug={args.map_slug!r} rows")
@@ -151,6 +188,12 @@ def main() -> None:
                 str(row["sample_key"]),
                 source_stride=source_stride,
                 tolerance=args.tolerance,
+                valid_end_frame=(
+                    int(row["alive_end_frame"])
+                    if "alive_end_frame" in row
+                    and not pd.isna(row["alive_end_frame"])
+                    else None
+                ),
             ),
         }
         for _, row in panel.iterrows()
@@ -161,6 +204,7 @@ def main() -> None:
         "manifest": args.manifest_name,
         "manifest_sha256": _sha256(manifest_path),
         "map_slug": args.map_slug,
+        "splits": args.splits,
         "source_fps": args.source_fps,
         "target_fps": args.target_fps,
         "source_stride": source_stride,

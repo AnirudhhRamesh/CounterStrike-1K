@@ -54,6 +54,11 @@ frame `t` with the aggregate of action rows `t+1` through `t+4`, producing the
 next observation at source frame `t+4`. A launch-time audit verifies this
 identity directly against the released state angles.
 
+Training windows are restricted to `alive_end_frame`, because the release's
+short post-death camera tail is no longer controlled by the POV action stream.
+The first-death stress evaluation retains those frames for visual review but
+masks post-alive targets from quantitative metrics.
+
 ## Action mapping changes
 
 DIAMOND's 51-dim CSGO action space is preserved. CS2-WM's locked 12-button

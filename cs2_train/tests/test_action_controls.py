@@ -7,6 +7,7 @@ from cs2_train.src.diamond import Segment, SegmentId
 from cs2_train.src.evaluate_action_sensitivity import (
     build_cross_round_donors,
     select_dataset_indices,
+    summarize_valid_rollout,
 )
 from cs2_train.src.train import apply_action_mode, sequence_derangement
 
@@ -70,6 +71,19 @@ def test_eval_donors_keep_pov_and_change_round() -> None:
         assert donor != index
         assert infos[donor]["round_id"] != infos[index]["round_id"]
         assert infos[donor]["pov_idx"] == infos[index]["pov_idx"]
+
+
+def test_rollout_metrics_mask_post_death_camera_targets() -> None:
+    metrics = summarize_valid_rollout(
+        [1.0, 2.0, 30.0, 40.0],
+        target_source_frames=[96, 100, 104, 108],
+        alive_end_frame=101,
+    )
+    assert metrics["valid_steps"] == [True, True, False, False]
+    assert metrics["mse_per_step"] == [1.0, 2.0, None, None]
+    assert metrics["valid_count"] == 2
+    assert metrics["mean"] == 1.5
+    assert metrics["last"] == 2.0
 
 
 def test_validation_pov_selection_preserves_global_indices() -> None:

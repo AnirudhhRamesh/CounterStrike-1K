@@ -43,6 +43,12 @@ ORed and mouse deltas are summed. The rebuttal launcher verifies both the
 per-frame and four-frame identities before training and records the result in
 `provenance/action_alignment_audit.json`.
 
+The release includes a short rendered camera tail after player death. Camera
+motion there can differ from the dead player's action stream, so sliding
+training and midpoint validation clamp each clip at `alive_end_frame`.
+First-death review videos retain the tail, while quantitative evaluator targets
+after `alive_end_frame` are masked.
+
 ### Off-by-one safety in window count (correctness fix)
 Some clips had `frames` in the manifest one higher than what torchcodec
 actually decodes (likely encoder dropped a tail frame due to PTS rounding).

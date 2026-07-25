@@ -432,6 +432,17 @@ class CSDataset(Dataset):
                 ticks = int(s["end_tick"]) - int(s["start_tick"])
                 n_frames = round(ticks / tick_rate * fps)
             usable = max(0, n_frames - 1)  # safety: drop possibly-bad final frame
+            # Post-death camera motion is not controlled by this POV's actions.
+            # Train and midpoint validation on the released alive interval only.
+            # first-death evaluation keeps the camera tail available but masks
+            # post-alive targets in evaluate_action_sensitivity.py.
+            alive_end_frame = s.get("alive_end_frame")
+            if (
+                window_mode != "first-death"
+                and alive_end_frame is not None
+                and not pd.isna(alive_end_frame)
+            ):
+                usable = min(usable, max(0, int(alive_end_frame)))
             s["num_frames"] = usable
 
         self._sample_by_key = {
@@ -778,6 +789,12 @@ class CSDataset(Dataset):
                 [frame_idx + CS2_ACTION_TARGET_OFFSET, frame_idx + self.stride]
                 for frame_idx in frame_ids
             ],
+            "alive_end_frame": (
+                int(clip["alive_end_frame"])
+                if clip.get("alive_end_frame") is not None
+                and not pd.isna(clip.get("alive_end_frame"))
+                else int(clip["num_frames"])
+            ),
             "source_fps": CS2_SOURCE_FPS,
             "target_fps": self.target_fps,
             "window_mode": self.window_mode,
