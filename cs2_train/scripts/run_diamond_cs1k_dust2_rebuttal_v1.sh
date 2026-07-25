@@ -64,6 +64,10 @@ print(json.dumps({
 }, indent=2))
 PY
 nvidia-smi -q > "${RUN_ROOT}/provenance/nvidia_smi_q.txt"
+"${PYTHON_BIN}" cs2_train/scripts/audit_cs1k_action_alignment.py \
+  --data-dir "${DATA_DIR}" \
+  --manifest-name "$(basename "${MANIFEST}")" \
+  --output "${RUN_ROOT}/provenance/action_alignment_audit.json"
 
 for arm in true shuffled; do
   out_dir="${RUN_ROOT}/${arm}"

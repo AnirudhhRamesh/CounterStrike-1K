@@ -46,12 +46,22 @@ uses the same optimized torchcodec decode path and action contract as the
 - source video/actions: 32 fps;
 - emitted model stream: 8 fps;
 - source-frame stride: 4;
-- buttons: OR over each four-frame interval;
-- mouse: sum `delta_pitch` and `delta_yaw` over the interval;
+- release actions are target-frame aligned, matching `cs2_clean` history
+  through frame `t` / action at frame `t+1`;
+- for an emitted observation at source frame `t`, buttons are ORed and mouse
+  deltas summed over source action rows `t+1` through `t+4` (inclusive), which
+  exactly describes the transition to the next observation at `t+4`;
 - resize after decode with antialiased bilinear interpolation.
 
 The DIAMOND adapter then maps the 12 buttons and two angular deltas to the
 upstream 51-dimensional CSGO encoding.
+
+Before either arm starts, `audit_cs1k_action_alignment.py` checks a
+deterministic train/validation/test panel. It requires action and state ticks
+to match, verifies `action[i].mouse == state[i] - state[i-1]`, and verifies
+that each four-row aggregate equals the corresponding 8-fps state transition.
+The machine-readable result is retained in
+`provenance/action_alignment_audit.json`.
 
 To reproduce that direct layout from public WebDataset shards, use the checked
 materializer. It filters before extraction, seeks members by the public sample
@@ -143,9 +153,10 @@ bash cs2_train/scripts/run_diamond_cs1k_dust2_rebuttal_v1.sh
 ```
 
 The launcher refuses a dirty tracked worktree, verifies the two dataset hashes,
-and records the code commit, config, package environment, CUDA/PyTorch
-environment, full `nvidia-smi -q`, exact commands, logs, metrics, checkpoints,
-sample plans, and evaluator outputs.
+runs the target-frame action-alignment audit, and records the code commit,
+config, package environment, CUDA/PyTorch environment, full `nvidia-smi -q`,
+exact commands, logs, metrics, checkpoints, sample plans, and evaluator
+outputs.
 
 ## Final audit and private review publication
 

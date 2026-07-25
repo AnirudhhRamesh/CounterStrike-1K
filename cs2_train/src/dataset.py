@@ -45,6 +45,13 @@ from .diamond import Batch, Segment, SegmentId
 
 ACTION_COLS = BUTTON_COLS + MOUSE_COLS
 CS2_SOURCE_FPS = 32
+# CounterStrike-1K actions are target-frame aligned: action row i contains the
+# mouse delta that produced state/video frame i (state[i] - state[i - 1]).
+# cs2_clean therefore pairs history ending at frame t with the action at t + 1.
+# DIAMOND instead expects action t to describe the transition obs[t] -> obs[t+1],
+# so every downsampled action interval begins one 32-fps source frame after its
+# emitted observation.
+CS2_ACTION_TARGET_OFFSET = 1
 WindowMode = Literal["sliding", "midpoint", "first-death"]
 
 
@@ -452,7 +459,11 @@ class CSDataset(Dataset):
             # source intervals gives every sampled frame one aligned action and
             # avoids silently truncating the final interval.
             window_frames = int(s.get("_round_common_frames", s["num_frames"]))
-            max_start = window_frames - self.T * self.stride
+            max_start = (
+                window_frames
+                - self.T * self.stride
+                - CS2_ACTION_TARGET_OFFSET
+            )
             s["windows"] = (
                 max(0, max_start + 1)
                 if window_mode == "sliding"
@@ -679,6 +690,7 @@ class CSDataset(Dataset):
             max_start = (
                 int(clip.get("_round_common_frames", clip["num_frames"]))
                 - self.T * self.stride
+                - CS2_ACTION_TARGET_OFFSET
             )
             if self.window_mode == "midpoint":
                 local_start = max_start // 2
@@ -719,13 +731,21 @@ class CSDataset(Dataset):
         return min(max(anchors[0] - span // 2, 0), max_start)
 
     def _aggregate_actions(self, dense: np.ndarray, start: int) -> np.ndarray:
-        """OR buttons and sum angular deltas over each 32->target-fps interval."""
+        """Aggregate target-aligned actions for emitted 32->target-fps transitions.
 
-        stop = start + self.T * self.stride
-        raw = dense[start:stop]
+        If emitted observation ``i`` is source frame ``start + i * stride``,
+        its action interval is the following source frames
+        ``[obs_frame + 1, obs_frame + stride]`` (inclusive). This matches
+        cs2_clean's history-at-t/action-at-t+1 convention and ensures the mouse
+        deltas integrate exactly from the emitted observation to the next one.
+        """
+
+        action_start = start + CS2_ACTION_TARGET_OFFSET
+        action_stop = action_start + self.T * self.stride
+        raw = dense[action_start:action_stop]
         if raw.shape[0] != self.T * self.stride:
             raise ValueError(
-                f"action window [{start}:{stop}] has {raw.shape[0]} records, "
+                f"action window [{action_start}:{action_stop}] has {raw.shape[0]} records, "
                 f"expected {self.T * self.stride}"
             )
         windows = raw.reshape(self.T, self.stride, len(ACTION_COLS))
@@ -754,6 +774,10 @@ class CSDataset(Dataset):
             "pov_idx": int(clip.get("pov_idx", clip.get("player_id", 0))),
             "source_start_frame": local_start,
             "source_frame_indices": frame_ids,
+            "source_action_frame_intervals": [
+                [frame_idx + CS2_ACTION_TARGET_OFFSET, frame_idx + self.stride]
+                for frame_idx in frame_ids
+            ],
             "source_fps": CS2_SOURCE_FPS,
             "target_fps": self.target_fps,
             "window_mode": self.window_mode,

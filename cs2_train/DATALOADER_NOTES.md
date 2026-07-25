@@ -33,6 +33,16 @@ autocast) is ~250 ms/microstep ≈ 64 samples/s, so the trainer is currently
 
 ## Implemented optimizations
 
+### Target-frame action alignment (correctness fix)
+CounterStrike-1K stores each mouse delta on the frame it produces:
+`action[i] == state[i] - state[i-1]`. This is the same convention used by
+`cs2_clean`, whose policy windows end video history at frame `t` and supervise
+the action at `t+1`. For DIAMOND at 8 fps, the transition from source video
+frame `t` to `t+4` therefore aggregates action rows `t+1:t+5`: buttons are
+ORed and mouse deltas are summed. The rebuttal launcher verifies both the
+per-frame and four-frame identities before training and records the result in
+`provenance/action_alignment_audit.json`.
+
 ### Off-by-one safety in window count (correctness fix)
 Some clips had `frames` in the manifest one higher than what torchcodec
 actually decodes (likely encoder dropped a tail frame due to PTS rounding).

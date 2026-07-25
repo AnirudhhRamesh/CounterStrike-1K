@@ -48,6 +48,12 @@ The adapter returns the same DIAMOND `Batch` fields:
 
 Resolution is `36x64` to preserve CS2-WM's 16:9 aspect ratio.
 
+CounterStrike-1K action rows are target-frame aligned. To convert them to
+DIAMOND's transition convention, the 32→8 fps adapter pairs observation source
+frame `t` with the aggregate of action rows `t+1` through `t+4`, producing the
+next observation at source frame `t+4`. A launch-time audit verifies this
+identity directly against the released state angles.
+
 ## Action mapping changes
 
 DIAMOND's 51-dim CSGO action space is preserved. CS2-WM's locked 12-button

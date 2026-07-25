@@ -6,8 +6,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
-from counterstrike1k.schema import ACTIONS_DTYPE
+from counterstrike1k.schema import ACTIONS_DTYPE, STATE_DTYPE
 
+from cs2_train.scripts.audit_cs1k_action_alignment import audit_sample
 from cs2_train.src.dataset import CSDataset
 
 
@@ -39,12 +40,17 @@ def _write_release(
         (root / "videos" / "360p" / f"{key}.mp4").write_bytes(b"video")
         actions = np.zeros(int(row["frames"]), dtype=ACTIONS_DTYPE)
         actions["tick"] = np.arange(len(actions), dtype=np.uint32)
-        actions["delta_pitch"] = 1.0
-        actions["delta_yaw"] = 2.0
+        actions["delta_pitch"] = np.arange(len(actions), dtype=np.float32)
+        actions["delta_yaw"] = 2 * np.arange(len(actions), dtype=np.float32)
         actions["buttons"][0] = 1 << 0
         actions["buttons"][1] = 1 << 1
         actions.tofile(root / "actions" / f"{key}.actions.bin")
-        (root / "state" / f"{key}.state.bin").write_bytes(b"state")
+        state = np.zeros(int(row["frames"]), dtype=STATE_DTYPE)
+        state["tick"] = actions["tick"]
+        state["pitch"] = np.cumsum(actions["delta_pitch"], dtype=np.float32)
+        yaw = np.cumsum(actions["delta_yaw"], dtype=np.float32)
+        state["yaw"] = (yaw + 180) % 360 - 180
+        state.tofile(root / "state" / f"{key}.state.bin")
         death_frame = 10 if int(row["pov_idx"]) == 0 else 20
         (root / "events" / f"{key}.events.json").write_text(
             json.dumps({"events": [{"type": "player_death", "frame_idx": death_frame}]})
@@ -89,8 +95,11 @@ def test_32_to_8_fps_actions_are_interval_aggregated(tmp_path: Path) -> None:
         torch.tensor([-1.0, 4 / 127.5 - 1]),
     )
     assert sample["actions"].shape == (2, 14)
-    assert sample["actions"][0, :2].tolist() == [1.0, 1.0]
-    assert sample["actions"][0, 12:].tolist() == [4.0, 8.0]
+    # Observation 0 -> observation 4 uses target-aligned action rows 1..4.
+    assert sample["actions"][0, :2].tolist() == [0.0, 1.0]
+    assert sample["actions"][0, 12:].tolist() == [10.0, 20.0]
+    # Observation 4 -> observation 8 uses action rows 5..8.
+    assert sample["actions"][1, 12:].tolist() == [26.0, 52.0]
     assert sample["actions"][1, :12].sum().item() == 0
 
 
@@ -110,7 +119,7 @@ def test_midpoint_and_first_death_share_start_across_povs(tmp_path: Path) -> Non
         mode="diamond",
         window_mode="midpoint",
     )
-    assert midpoint._resolve_window(0)[1] == midpoint._resolve_window(1)[1] == 16
+    assert midpoint._resolve_window(0)[1] == midpoint._resolve_window(1)[1] == 15
 
     first_death = CSDataset(
         tmp_path,
@@ -140,3 +149,15 @@ def test_stride_must_match_target_fps(tmp_path: Path) -> None:
         assert "expected 4" in str(exc)
     else:
         raise AssertionError("conflicting stride should fail")
+
+
+def test_release_target_alignment_audit(tmp_path: Path) -> None:
+    _write_release(tmp_path, [_row("sample", round_id="round", pov_idx=0)])
+    result = audit_sample(
+        tmp_path,
+        "sample",
+        source_stride=4,
+        tolerance=1e-4,
+    )
+    assert result["passed"]
+    assert result["transitions_checked"] == 10
