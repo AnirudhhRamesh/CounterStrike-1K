@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from cs2_train.scripts.summarize_diamond_rebuttal import (
     ACTION_MODES,
+    CROSS_WINDOW_IDENTICAL_FIELDS,
     METRICS,
     load_inline_trajectory,
     summarize_window,
     validate_training_runs,
+    validate_window_contracts,
 )
 
 
@@ -152,3 +156,74 @@ def test_inline_trajectory_requires_every_paired_checkpoint(tmp_path) -> None:
     assert [row["step"] for row in result["true"]] == [2500, 5000]
     assert result["true"][0]["one_step"]["shuffled_minus_true_mse"] == 0.1
     assert result["shuffled"][1]["rollout"]["true_mse_per_step"] == [0.2, 0.3]
+
+
+def _window_contract(*, sample_plan: str, action_plan: str) -> dict:
+    shared = {
+        "config_sha256": "config",
+        "manifest_sha256": "manifest",
+        "split": "test",
+        "map_slug": "dust2",
+        "target_fps": 8,
+        "resize": [36, 64],
+        "rollout_steps": 8,
+        "rollout_target_masking": "source_frame < alive_end_frame",
+        "num_denoising_steps": 1,
+        "s_cond": 0.005,
+        "eval_seeds": [37, 41, 43],
+        "action_modes": ["true", "shuffled", "zeros"],
+        "num_eval_samples": 690,
+        "num_rounds": 69,
+    }
+    assert set(shared) == set(CROSS_WINDOW_IDENTICAL_FIELDS)
+    return {
+        **shared,
+        "sample_plan_sha256": sample_plan,
+        "action_plan_sha256": action_plan,
+    }
+
+
+def test_window_contracts_allow_only_window_specific_plans_to_differ() -> None:
+    contracts = {
+        "midpoint": _window_contract(
+            sample_plan="midpoint-samples",
+            action_plan="midpoint-actions",
+        ),
+        "first-death": _window_contract(
+            sample_plan="death-samples",
+            action_plan="death-actions",
+        ),
+    }
+
+    shared = validate_window_contracts(contracts)
+
+    assert shared["manifest_sha256"] == "manifest"
+    assert "sample_plan_sha256" not in shared
+    assert "action_plan_sha256" not in shared
+
+
+@pytest.mark.parametrize(
+    ("field", "different"),
+    [
+        ("config_sha256", "other-config"),
+        ("eval_seeds", [37, 41]),
+        ("num_eval_samples", 689),
+        ("num_rounds", 68),
+        ("rollout_target_masking", "none"),
+    ],
+)
+def test_window_contracts_reject_cross_window_drift(field, different) -> None:
+    contracts = {
+        "midpoint": _window_contract(
+            sample_plan="midpoint-samples",
+            action_plan="midpoint-actions",
+        ),
+        "first-death": _window_contract(
+            sample_plan="death-samples",
+            action_plan="death-actions",
+        ),
+    }
+    contracts["first-death"][field] = different
+
+    with pytest.raises(ValueError, match=f"window modes differ on {field}"):
+        validate_window_contracts(contracts)

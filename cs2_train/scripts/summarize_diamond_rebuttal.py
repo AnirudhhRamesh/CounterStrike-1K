@@ -19,6 +19,22 @@ WINDOW_MODES = ("midpoint", "first-death")
 TRAINING_ARMS = ("true", "shuffled")
 ACTION_MODES = ("true", "shuffled", "zeros")
 TRAINING_COMMIT = "34524f6b6f1f805200d72ab4e77f3a55dd6415f8"
+CROSS_WINDOW_IDENTICAL_FIELDS = (
+    "config_sha256",
+    "manifest_sha256",
+    "split",
+    "map_slug",
+    "target_fps",
+    "resize",
+    "rollout_steps",
+    "rollout_target_masking",
+    "num_denoising_steps",
+    "s_cond",
+    "eval_seeds",
+    "action_modes",
+    "num_eval_samples",
+    "num_rounds",
+)
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -125,6 +141,32 @@ def validate_contract(
     if first["split"] != "test" or first["map_slug"] != "dust2":
         raise ValueError("confirmatory summary is not the Dust2 test split")
     return {field: first[field] for field in identical_fields}
+
+
+def validate_window_contracts(contracts: dict[str, dict]) -> dict:
+    """Require all non-window-specific evaluation settings to be identical.
+
+    Midpoint and first-death deliberately have different sample and action
+    plans, so their plan hashes are retained per window but excluded from this
+    shared contract.
+    """
+
+    if set(contracts) != set(WINDOW_MODES):
+        raise ValueError(
+            f"window contracts {sorted(contracts)} != {sorted(WINDOW_MODES)}"
+        )
+    reference_mode = WINDOW_MODES[0]
+    reference = contracts[reference_mode]
+    for window_mode in WINDOW_MODES[1:]:
+        candidate = contracts[window_mode]
+        for field in CROSS_WINDOW_IDENTICAL_FIELDS:
+            if candidate[field] != reference[field]:
+                raise ValueError(
+                    f"window modes differ on {field}: "
+                    f"{reference_mode}={reference[field]!r} != "
+                    f"{window_mode}={candidate[field]!r}"
+                )
+    return {field: reference[field] for field in CROSS_WINDOW_IDENTICAL_FIELDS}
 
 
 def validate_training_runs(
@@ -542,7 +584,7 @@ def main() -> None:
         expected_step=args.expected_step,
         cadence=int(training_audit["matched_training_fields"]["val_every"]),
     )
-    contract = {}
+    contracts = {}
     windows = {}
     for window_index, window_mode in enumerate(WINDOW_MODES):
         window_summaries = {
@@ -553,12 +595,7 @@ def main() -> None:
             expected_step=args.expected_step,
             expected_samples=args.expected_samples,
         )
-        if (
-            contract
-            and window_contract["manifest_sha256"] != contract["manifest_sha256"]
-        ):
-            raise ValueError("window modes use different manifests")
-        contract = window_contract
+        contracts[window_mode] = window_contract
         windows[window_mode] = summarize_window(
             true_summary=window_summaries["true"],
             shuffled_summary=window_summaries["shuffled"],
@@ -566,9 +603,10 @@ def main() -> None:
             shuffled_rows=rows[f"shuffled/{window_mode}"],
             bootstrap_seed=args.bootstrap_seed + window_index * 10_000,
         )
+    shared_contract = validate_window_contracts(contracts)
 
     output = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "endpoint_step": args.expected_step,
         "training_audit": training_audit,
@@ -580,7 +618,8 @@ def main() -> None:
             ),
             "arms": inline_trajectory,
         },
-        "contract": contract,
+        "contract": shared_contract,
+        "contract_by_window": contracts,
         "checkpoint_sha256": {
             key: summary["checkpoint_sha256"] for key, summary in summaries.items()
         },

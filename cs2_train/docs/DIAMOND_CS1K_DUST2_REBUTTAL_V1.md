@@ -218,12 +218,18 @@ requires the pinned training commit, the declared arm identity, matched
 training hyperparameters, one final checkpoint per arm, distinct checkpoint
 hashes between arms, and the same manifest, evaluator config, checkpoint step,
 sample plan, held-out action-donor plan, action modes, rollout settings, and
-evaluation seeds across the two checkpoint arms. It writes:
+evaluation seeds across the two checkpoint arms. It also requires midpoint
+and first-death evaluation to share the config, manifest, split, map, target
+rate, resize, rollout/masking settings, seeds, action modes, sample count, and
+round count. Window-specific sample and donor-plan hashes are retained
+separately because the two window definitions intentionally choose different
+source frames. It writes:
 
 - `evaluation/rebuttal_summary.json`, with machine-readable checkpoint means,
   within-checkpoint action sensitivity, true-versus-shuffled training effects,
   the action-sensitivity difference in differences, and the complete paired
-  2,500-step inline validation/rollout trajectory for both training arms;
+  2,500-step inline validation/rollout trajectory for both training arms,
+  together with a shared cross-window contract and each window's plan hashes;
 - `evaluation/rebuttal_summary.md`, with a compact table of the same
   round-clustered 95% bootstrap intervals.
 
