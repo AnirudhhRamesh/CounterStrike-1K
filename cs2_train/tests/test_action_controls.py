@@ -50,6 +50,26 @@ def test_sequence_shuffle_is_cross_round_and_temporally_coherent() -> None:
         assert torch.equal(shuffled.act[target_idx], batch.act[donor_idx])
 
 
+def test_sequence_shuffle_uses_only_the_dedicated_action_rng() -> None:
+    batch = collate_diamond(
+        [
+            _segment(0, "a"),
+            _segment(1, "b"),
+            _segment(2, "c"),
+            _segment(3, "d"),
+        ]
+    )
+    torch.manual_seed(1234)
+    global_rng_before = torch.random.get_rng_state().clone()
+    action_generator = torch.Generator().manual_seed(9)
+    action_rng_before = action_generator.get_state().clone()
+
+    apply_action_mode(batch, "shuffled", generator=action_generator)
+
+    assert torch.equal(torch.random.get_rng_state(), global_rng_before)
+    assert not torch.equal(action_generator.get_state(), action_rng_before)
+
+
 def test_derangement_rejects_unshufflable_round_batch() -> None:
     try:
         sequence_derangement(3, labels=["same", "same", "same"])

@@ -23,6 +23,14 @@ the same data loader, architecture, optimizer, schedule, validation windows,
 and checkpoint cadence. The test endpoint is the final step 50,000 checkpoint;
 test results are not used for checkpoint selection.
 
+Each arm is launched in a fresh process. The global CPU and CUDA RNGs are
+reset to seed 28 before dataset and model construction, while action
+derangements use a separate CPU `torch.Generator` seeded with 90001. A release
+test requires a shuffled-action draw to advance only that dedicated generator,
+not the global model/data RNG. Consequently, changing the arm changes the
+action intervention without changing the seeded initialization or data-order
+RNG stream.
+
 ## Dataset contract
 
 The input is the materialized CounterStrike-1K 360p tier and the locked
