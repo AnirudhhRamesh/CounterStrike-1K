@@ -151,9 +151,14 @@ contrast is reported as a secondary diagnostic.
 Install and test:
 
 ```bash
-uv sync --extra train --extra eval
-uv run --with pytest pytest -q cs2_train/tests
+uv sync --frozen --extra train --extra eval
+uv run --frozen --with pytest==9.1.1 pytest -q cs2_train/tests
 ```
+
+Pull requests touching the DIAMOND adapter run this exact command on Python
+3.12 in `.github/workflows/diamond-cs1k-tests.yml`. The workflow pins every
+third-party GitHub Action by commit SHA and pins the `uv` and `pytest`
+versions.
 
 Run both arms and both confirmatory evaluations:
 
