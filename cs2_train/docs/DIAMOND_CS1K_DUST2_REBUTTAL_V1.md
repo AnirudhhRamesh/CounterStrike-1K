@@ -275,6 +275,54 @@ torch/torchvision weight provenance, retains per-sample/per-step metrics, and
 uses the same round-clustered paired bootstrap convention as the pixel
 endpoint.
 
+### Reproduce Action Recoverability Ratio
+
+The ARR probe contract is frozen separately in
+`configs/temporal_arr_cs1k_dust2_v1.json`. It samples 100,000 alive-only train
+windows and 10,000 alive-only validation windows before decoding, with seeds
+20250725 and 20250726 respectively. Every nine-frame window becomes two
+five-frame/four-transition segments sharing only the boundary frame. No test
+row or generated rollout is used to train or select the probe.
+
+The frame encoder is public DINOv2-B/14 from
+`facebookresearch/dinov2@7764ea0f912e53c92e82eb78a2a1631e92725fc8`;
+the expected weight SHA-256 is
+`0b8b82f85de91b424aded121c7e1dcc2b7bc6d0adeea651bf73a13307fad8c73`.
+This is an explicit reproducibility deviation from MIRA's manually gated
+DINOv3-B. The backbone is frozen. A 2-layer, width-384 temporal transformer
+head is selected by validation macro AP over 30 epochs.
+
+```bash
+PYTHON_BIN="$PWD/.venv/bin/python" \
+DATA_DIR=/data/cs1k-360p \
+ARR_ROOT=/runs/temporal-arr-cs1k-dust2-v1 \
+bash cs2_train/scripts/run_temporal_action_probe_dust2_v1.sh
+```
+
+The launcher verifies both dataset hashes, refuses to overwrite an existing
+output, and records the code/config/data hashes, package environment, GPU
+environment, commands, sampled-window plans, feature-array hashes, validation
+predictions, selected epoch, and probe checkpoint hash.
+
+Evaluate each final rollout archive with:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_arr \
+  --archive-dir /runs/diamond-cs1k-dust2-360p-rebuttal-v1/true/evaluation/midpoint-dynamics/rollout_archive \
+  --probe-checkpoint /runs/temporal-arr-cs1k-dust2-v1/probe/temporal_action_probe.pt \
+  --bootstrap-replicates 10000 \
+  --bootstrap-seed 20250728
+```
+
+For each class, ARR is generated-video AP divided by the corresponding
+model-native real-video AP. AP groups exact score ties, so constant or
+quantized predictions and cluster-bootstrap multiplicities cannot make the
+result depend on row ordering. The scorer reports recovery of each rollout's
+own conditioning actions, alignment with the true target actions, and whether
+the shuffled rollout redirects toward its donor action stream. All confidence
+intervals resample `round_id` and reuse the same bootstrap multiplicities for
+the real ceiling and every action mode.
+
 ## Final audit and private review publication
 
 The training launcher is deliberately frozen at the preregistered training

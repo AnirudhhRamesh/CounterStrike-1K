@@ -77,6 +77,30 @@ This fixed-RAFT endpoint complements rather than replaces the frozen pixel-MSE
 endpoint. The protocol documents its world-view crop, weight hash, bootstrap
 unit, limitations, and the follow-on MIRA-style action/state probes.
 
+The shared temporal action probe for Action Recoverability Ratio is frozen in
+`configs/temporal_arr_cs1k_dust2_v1.json`. It uses only real train/validation
+windows and a public commit- and weight-pinned DINOv2-B/14 backbone:
+
+```bash
+DATA_DIR=/data/cs1k-360p \
+ARR_ROOT=/runs/temporal-arr-cs1k-dust2-v1 \
+bash cs2_train/scripts/run_temporal_action_probe_dust2_v1.sh
+```
+
+After a confirmatory evaluator writes `rollout_archive/`, score it without
+resampling the world model:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_arr \
+  --archive-dir /path/to/evaluation/rollout_archive \
+  --probe-checkpoint /runs/temporal-arr-cs1k-dust2-v1/probe/temporal_action_probe.pt \
+  --bootstrap-replicates 10000
+```
+
+ARR uses exact-tie-aware average precision and a paired bootstrap clustered by
+round. The public DINOv2 substitution, label definition, real-video ceiling,
+post-alive masking, and provenance requirements are specified in the protocol.
+
 This is separate from the historical Table 11 reproduction below.
 
 ## Paper Table 11 reproduction
