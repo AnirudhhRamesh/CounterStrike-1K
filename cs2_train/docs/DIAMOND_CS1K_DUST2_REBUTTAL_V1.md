@@ -146,3 +146,54 @@ The launcher refuses a dirty tracked worktree, verifies the two dataset hashes,
 and records the code commit, config, package environment, CUDA/PyTorch
 environment, full `nvidia-smi -q`, exact commands, logs, metrics, checkpoints,
 sample plans, and evaluator outputs.
+
+## Final audit and private review publication
+
+The training launcher is deliberately frozen at the preregistered training
+commit. After its four confirmatory evaluations finish, run the cross-arm
+audit from the current analysis commit:
+
+```bash
+python -m cs2_train.scripts.summarize_diamond_rebuttal \
+  --run-root /runs/diamond-cs1k-dust2-360p-rebuttal-v1 \
+  --expected-step 50000 \
+  --expected-samples 690
+```
+
+The audit refuses to summarize an incomplete or mismatched experiment. It
+requires the same manifest, config, checkpoint step, sample plan, held-out
+action-donor plan, action modes, rollout settings, and evaluation seeds across
+the two checkpoint arms. It writes:
+
+- `evaluation/rebuttal_summary.json`, with machine-readable checkpoint means,
+  within-checkpoint action sensitivity, true-versus-shuffled training effects,
+  and the action-sensitivity difference in differences;
+- `evaluation/rebuttal_summary.md`, with a compact table of the same
+  round-clustered 95% bootstrap intervals.
+
+The difference in differences is the primary causal diagnostic:
+
+`[MSE(shuffled input) - MSE(true input)]_true-trained`
+`- [MSE(shuffled input) - MSE(true input)]_shuffled-trained`
+
+A positive value means that aligned-action training increased sensitivity to
+the correct held-out action sequence beyond any sensitivity learned by the
+shuffled control.
+
+Only after the audit succeeds, publish the sanitized summaries and a bounded
+set of review videos to the existing private S3 index:
+
+```bash
+python -m cs2_train.scripts.publish_diamond_final_review \
+  --run-root /runs/diamond-cs1k-dust2-360p-rebuttal-v1 \
+  --bucket cs2-wm-rollout-preview-377114445113 \
+  --prefix diamond-cs1k/rebuttal-v1 \
+  --run-id diamond-cs1k-dust2-360p-rebuttal-v1 \
+  --step 50000 \
+  --videos-per-eval 4
+```
+
+The publisher verifies that the bucket blocks public access, enables AES-256
+server-side encryption for every upload, and never uploads model checkpoints,
+optimizer state, or per-sample data. The long-lived signing service then
+refreshes the owner-only viewer index with seven-day pre-signed artifact URLs.
