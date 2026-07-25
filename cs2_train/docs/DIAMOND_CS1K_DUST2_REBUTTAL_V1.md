@@ -59,6 +59,16 @@ uses the same optimized torchcodec decode path and action contract as the
   the aligned-action training hours;
 - resize after decode with antialiased bilinear interpolation.
 
+The adapter vendors this contract rather than importing `cs2_clean`, so the
+release has no private runtime dependency. Both loaders use manifest-indexed
+overlapping windows, TorchCodec random-access decoding with a PyAV fallback,
+per-worker decoder LRU caches, pinned-memory transfer, and persistent workers.
+The frozen DIAMOND run uses eight workers and prefetch factor four; it also
+caches densified actions and can seek public WebDataset members by the release
+sample index before atomically materializing them. These additions implement
+DIAMOND's 8-fps transition and public-shard requirements without changing the
+underlying CounterStrike-1K sample or action semantics.
+
 The DIAMOND adapter then maps the 12 buttons and two angular deltas to the
 upstream 51-dimensional CSGO encoding.
 

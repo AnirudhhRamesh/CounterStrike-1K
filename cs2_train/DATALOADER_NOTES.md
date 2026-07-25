@@ -6,6 +6,36 @@ DLAMI Ubuntu 24, torchcodec 0.10, torch 2.10+cu128.
 Data: `/opt/dlami/nvme/cs2-data` — 340 train clips (572k frames @ 30 FPS),
 videos are 360×640 H.264 mp4, actions in parquet.
 
+The throughput table below is the earlier loader microbenchmark, not the
+frozen CounterStrike-1K Dust2 rebuttal run. The production adapter retains the
+same optimized design but uses the release's 32-fps binary action/state
+contract and the pinned Dust2 manifest.
+
+## Relationship to `cs2_clean`
+
+The DIAMOND adapter is intentionally self-contained so the public baseline
+does not depend on a private training checkout. It nevertheless follows the
+same release contract and optimized loader pattern as `cs2_clean`:
+
+| Concern | `cs2_clean` pattern | DIAMOND CounterStrike-1K adapter |
+|---|---|---|
+| sample selection | manifest-filtered overlapping windows | pinned, match-disjoint manifest; overlapping alive-only windows |
+| video decode | TorchCodec random access, PyAV fallback | TorchCodec `get_frames_at`, PyAV fallback |
+| reuse | per-worker decoder LRU | per-worker decoder LRU plus dense-action cache |
+| worker pipeline | pinned memory and persistent workers | 8 persistent workers, prefetch factor 4, pinned memory |
+| action schema | 12 packed buttons plus pitch/yaw deltas | identical source schema, mapped to DIAMOND's 51-D encoding |
+| action timing | history through `t`, target action at `t+1` | observation `t` to `t+4` aggregates rows `t+1..t+4` |
+| storage | materialized release files | materialized files first; indexed WebDataset/tar fallback with atomic cache |
+
+The differences are model-contract requirements, not competing dataset
+implementations. DIAMOND consumes four 32-fps action rows per 8-fps transition,
+requires temporal whole-sequence shuffling for its control arm, and excludes
+the non-player-controlled post-death render tail. The confirmatory production
+settings are frozen in
+`configs/diamond_cs1k_dust2_360p_rebuttal_v1.json`; the launcher records the
+package environment, manifest/provenance hashes, code commit, and exhaustive
+action-alignment audit before either arm starts.
+
 ## Throughput
 
 | num_workers | bs | T  | ms/batch | samples/s |
