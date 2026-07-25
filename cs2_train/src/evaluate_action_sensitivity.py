@@ -181,6 +181,28 @@ def build_cross_round_donors(infos: list[dict], seed: int) -> list[int]:
     return donors
 
 
+def select_dataset_indices(
+    dataset: CSDataset,
+    *,
+    pov_idx: int | None,
+    max_samples: int | None,
+) -> list[int]:
+    """Select deterministic evaluator rows without changing dataset ordering."""
+
+    indices = list(range(len(dataset)))
+    if pov_idx is not None:
+        indices = [
+            index
+            for index in indices
+            if int(dataset._resolve_window(index)[0].get("pov_idx", -1)) == pov_idx
+        ]
+        if not indices:
+            raise ValueError(f"no evaluator rows have pov_idx={pov_idx}")
+    if max_samples is not None:
+        indices = indices[:max_samples]
+    return indices
+
+
 def _checkpoint_args(
     checkpoint: dict,
     cli_args: argparse.Namespace,
@@ -319,6 +341,15 @@ def main() -> None:
     parser.add_argument("--weights", choices=["raw", "ema", "auto"], default="auto")
     parser.add_argument("--expected-samples", type=int, default=690)
     parser.add_argument("--max-samples", type=int)
+    parser.add_argument(
+        "--pov-idx",
+        type=int,
+        default=None,
+        help=(
+            "Optional fixed POV slot for validation-only convergence audits. "
+            "The confirmatory test protocol leaves this unset."
+        ),
+    )
     parser.add_argument("--max-review-videos", type=int, default=24)
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
@@ -383,29 +414,35 @@ def main() -> None:
         resolution=getattr(model_args, "resolution", "360p"),
         verify_sha256=bool(getattr(model_args, "verify_sha256", False)),
     )
-    if args.max_samples is None and len(dataset) != args.expected_samples:
+    selected_indices = select_dataset_indices(
+        dataset,
+        pov_idx=args.pov_idx,
+        max_samples=args.max_samples,
+    )
+    if args.max_samples is None and len(selected_indices) != args.expected_samples:
         raise ValueError(
             f"confirmatory evaluation expected {args.expected_samples} held-out POV rows, "
-            f"found {len(dataset)}"
+            f"found {len(selected_indices)}"
         )
-    num_samples = (
-        len(dataset)
-        if args.max_samples is None
-        else min(len(dataset), args.max_samples)
-    )
+    num_samples = len(selected_indices)
     infos: list[dict] = []
     action_windows: list[torch.Tensor] = []
-    for dataset_index in range(num_samples):
+    for dataset_index in selected_indices:
         actions, info = dataset.action_window_at(dataset_index)
         action_windows.append(actions)
         infos.append(info)
     donors = build_cross_round_donors(infos, seed=args.eval_seeds[0] + 90_001)
     donor_actions = [action_windows[donor] for donor in donors]
+    position_by_dataset_index = {
+        int(info["dataset_index"]): position for position, info in enumerate(infos)
+    }
 
     sample_plan = [
         {
             **info,
-            "action_donor_dataset_index": int(donors[idx]),
+            "action_donor_dataset_index": int(
+                infos[donors[idx]]["dataset_index"]
+            ),
             "action_donor_sample_key": infos[donors[idx]]["sample_key"],
             "action_donor_round_id": infos[donors[idx]]["round_id"],
         }
@@ -415,7 +452,7 @@ def main() -> None:
     sample_plan_path.write_text(json.dumps(sample_plan, indent=2), encoding="utf-8")
 
     loader = DataLoader(
-        torch.utils.data.Subset(dataset, range(num_samples)),
+        torch.utils.data.Subset(dataset, selected_indices),
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
@@ -432,8 +469,12 @@ def main() -> None:
     for batch_index, cpu_batch in enumerate(loader):
         batch = cpu_batch.to(device)
         dataset_indices = [int(info["dataset_index"]) for info in batch.info]
+        positions = [
+            position_by_dataset_index[dataset_index]
+            for dataset_index in dataset_indices
+        ]
         shuffled_actions = torch.stack(
-            [donor_actions[index] for index in dataset_indices],
+            [donor_actions[position] for position in positions],
         ).to(device)
         modes: dict[str, Batch] = {
             "true": batch,
@@ -443,11 +484,15 @@ def main() -> None:
                 [
                     {
                         **info,
-                        "action_source_dataset_index": int(donors[index]),
-                        "action_source_sample_key": infos[donors[index]]["sample_key"],
-                        "action_source_round_id": infos[donors[index]]["round_id"],
+                        "action_source_dataset_index": int(
+                            infos[donors[position]]["dataset_index"]
+                        ),
+                        "action_source_sample_key": infos[donors[position]][
+                            "sample_key"
+                        ],
+                        "action_source_round_id": infos[donors[position]]["round_id"],
                     }
-                    for info, index in zip(batch.info, dataset_indices, strict=True)
+                    for info, position in zip(batch.info, positions, strict=True)
                 ],
             ),
             "zeros": replace_actions(
@@ -489,8 +534,10 @@ def main() -> None:
 
                 if eval_seed == args.eval_seeds[0]:
                     predictions_for_review[mode] = rollout.detach().cpu()
-                for row_idx, dataset_index in enumerate(dataset_indices):
-                    info = infos[dataset_index]
+                for row_idx, (dataset_index, position) in enumerate(
+                    zip(dataset_indices, positions, strict=True)
+                ):
+                    info = infos[position]
                     rollout_values = (
                         rollout_mse_steps[row_idx].detach().float().cpu().tolist()
                     )
@@ -508,7 +555,7 @@ def main() -> None:
                             "action_source_sample_key": (
                                 info["sample_key"]
                                 if mode == "true"
-                                else infos[donors[dataset_index]]["sample_key"]
+                                else infos[donors[position]]["sample_key"]
                                 if mode == "shuffled"
                                 else None
                             ),
@@ -529,10 +576,12 @@ def main() -> None:
             and review_count < args.max_review_videos
         ):
             ground_truth = batch.obs[:, n_cond : n_cond + args.rollout_steps].cpu()
-            for row_idx, dataset_index in enumerate(dataset_indices):
+            for row_idx, (dataset_index, position) in enumerate(
+                zip(dataset_indices, positions, strict=True)
+            ):
                 if review_count >= args.max_review_videos:
                     break
-                safe_key = str(infos[dataset_index]["sample_key"]).replace("/", "_")
+                safe_key = str(infos[position]["sample_key"]).replace("/", "_")
                 relative_path = Path("review") / f"{review_count:04d}_{safe_key}.mp4"
                 save_review_video(
                     out_path=args.out_dir / relative_path,
@@ -546,9 +595,10 @@ def main() -> None:
                 review_manifest.append(
                     {
                         "path": relative_path.as_posix(),
-                        "sample_key": infos[dataset_index]["sample_key"],
-                        "round_id": infos[dataset_index]["round_id"],
-                        "pov_idx": infos[dataset_index]["pov_idx"],
+                        "dataset_index": dataset_index,
+                        "sample_key": infos[position]["sample_key"],
+                        "round_id": infos[position]["round_id"],
+                        "pov_idx": infos[position]["pov_idx"],
                         "eval_seed": args.eval_seeds[0],
                         "columns": ["ground_truth", *args.action_modes],
                     }
@@ -591,6 +641,7 @@ def main() -> None:
         "map_slug": args.map_slug,
         "window_mode": args.window_mode,
         "target_fps": int(getattr(model_args, "target_fps", 8)),
+        "pov_idx_filter": args.pov_idx,
         "resize": list(preset["resize"]),
         "rollout_steps": args.rollout_steps,
         "num_denoising_steps": denoising_steps,

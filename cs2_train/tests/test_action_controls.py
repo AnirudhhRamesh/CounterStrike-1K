@@ -4,7 +4,10 @@ import torch
 
 from cs2_train.src.dataset import collate_diamond
 from cs2_train.src.diamond import Segment, SegmentId
-from cs2_train.src.evaluate_action_sensitivity import build_cross_round_donors
+from cs2_train.src.evaluate_action_sensitivity import (
+    build_cross_round_donors,
+    select_dataset_indices,
+)
 from cs2_train.src.train import apply_action_mode, sequence_derangement
 
 
@@ -67,3 +70,28 @@ def test_eval_donors_keep_pov_and_change_round() -> None:
         assert donor != index
         assert infos[donor]["round_id"] != infos[index]["round_id"]
         assert infos[donor]["pov_idx"] == infos[index]["pov_idx"]
+
+
+def test_validation_pov_selection_preserves_global_indices() -> None:
+    class Dataset:
+        def __init__(self) -> None:
+            self.rows = [
+                {"pov_idx": 0},
+                {"pov_idx": 1},
+                {"pov_idx": 0},
+                {"pov_idx": 1},
+                {"pov_idx": 0},
+            ]
+
+        def __len__(self) -> int:
+            return len(self.rows)
+
+        def _resolve_window(self, index: int):
+            return self.rows[index], 0, []
+
+    selected = select_dataset_indices(  # type: ignore[arg-type]
+        Dataset(),
+        pov_idx=0,
+        max_samples=2,
+    )
+    assert selected == [0, 2]

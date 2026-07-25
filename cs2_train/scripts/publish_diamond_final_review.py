@@ -63,8 +63,17 @@ def main() -> None:
         args.run_root / "evaluation" / "rebuttal_summary.json",
         args.run_root / "evaluation" / "rebuttal_summary.md",
     )
+    convergence_paths = (
+        args.run_root / "evaluation" / "validation_checkpoint_trajectory.json",
+        args.run_root / "evaluation" / "validation_checkpoint_trajectory.md",
+    )
     if not all(path.is_file() for path in combined_paths):
         raise FileNotFoundError("run summarize_diamond_rebuttal.py before final publishing")
+    if not all(path.is_file() for path in convergence_paths):
+        raise FileNotFoundError(
+            "run run_diamond_validation_checkpoint_audit.py before final publishing"
+        )
+    convergence = json.loads(convergence_paths[0].read_text(encoding="utf-8"))
 
     for arm in ("true", "shuffled"):
         arm_payload = raw["arms"][arm]
@@ -138,6 +147,60 @@ def main() -> None:
                 arm_payload["events"],
                 key=lambda item: (int(item["step"]), str(item["kind"])),
             )
+
+        diagnostic_artifacts = {}
+        for label, path in (
+            ("validation_trajectory_json", convergence_paths[0]),
+            ("validation_trajectory_markdown", convergence_paths[1]),
+        ):
+            key = "/".join(
+                (
+                    args.prefix.strip("/"),
+                    args.run_id,
+                    arm,
+                    "diagnostic",
+                    path.name,
+                )
+            )
+            diagnostic_artifacts[label] = upload_artifact(
+                client,
+                bucket=args.bucket,
+                key=key,
+                path=path,
+            )
+        diagnostic_event = {
+            "step": args.step,
+            "kind": "validation_checkpoint_audit",
+            "published_at_utc": datetime.now(UTC).isoformat(),
+            "artifacts": diagnostic_artifacts,
+            "metrics": {
+                "purpose": convergence["purpose"],
+                "checkpoints": convergence["contract"]["checkpoints"],
+                "pov_idx": convergence["contract"]["pov_idx"],
+                "num_rounds": convergence["contract"]["expected_samples"],
+                "eval_seeds": convergence["contract"]["eval_seeds"],
+                "fixed_noise_across_checkpoints": convergence["contract"][
+                    "fixed_noise_across_checkpoints"
+                ],
+                "trajectory": convergence["arms"][arm],
+                "endpoint_sensitivity_change": convergence[
+                    "endpoint_sensitivity_change"
+                ][arm],
+            },
+        }
+        arm_payload["events"] = [
+            prior
+            for prior in arm_payload.get("events", [])
+            if not (
+                int(prior.get("step", -1)) == args.step
+                and prior.get("kind") == diagnostic_event["kind"]
+            )
+        ]
+        arm_payload["events"].append(diagnostic_event)
+        arm_payload["events"] = sorted(
+            arm_payload["events"],
+            key=lambda item: (int(item["step"]), str(item["kind"])),
+        )
         arm_payload["status"] = "complete"
         arm_payload["final_step"] = args.step
 

@@ -191,8 +191,26 @@ checkpoints are a fixed-noise learning curve. The paper-facing endpoint instead
 uses the preregistered step-50,000 checkpoints, three fixed evaluation seeds,
 and all held-out test rows.
 
-Only after the audit succeeds, publish the sanitized summaries and a bounded
-set of review videos to the existing private S3 index:
+For the secondary “train longer?” decision, evaluate the saved checkpoints on
+validation data only:
+
+```bash
+python -m cs2_train.scripts.run_diamond_validation_checkpoint_audit \
+  --run-root /runs/diamond-cs1k-dust2-360p-rebuttal-v1 \
+  --data-dir /data/cs1k-360p \
+  --steps 10000 20000 30000 40000 50000 \
+  --pov-idx 0 \
+  --expected-samples 54
+```
+
+This audit selects the same POV slot from every one of the 54 validation
+rounds and uses identical midpoint windows, action donors, batch order, and
+diffusion seeds at all five checkpoints for both training arms. It reports the
+round-clustered change in action sensitivity from step 40,000 to 50,000. It
+never reads the test split and cannot alter the primary 50,000-step endpoint.
+
+Only after both audits succeed, publish the sanitized summaries, convergence
+report, and a bounded set of review videos to the existing private S3 index:
 
 ```bash
 python -m cs2_train.scripts.publish_diamond_final_review \
