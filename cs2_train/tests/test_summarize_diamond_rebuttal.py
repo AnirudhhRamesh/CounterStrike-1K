@@ -9,6 +9,7 @@ from cs2_train.scripts.summarize_diamond_rebuttal import (
     CROSS_WINDOW_IDENTICAL_FIELDS,
     METRICS,
     load_inline_trajectory,
+    main as summarize_main,
     summarize_window,
     validate_training_runs,
     validate_window_contracts,
@@ -227,3 +228,135 @@ def test_window_contracts_reject_cross_window_drift(field, different) -> None:
 
     with pytest.raises(ValueError, match=f"window modes differ on {field}"):
         validate_window_contracts(contracts)
+
+
+def test_summarizer_cli_retains_shared_and_window_specific_contracts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    training_commit = "abc123"
+    provenance = tmp_path / "provenance"
+    provenance.mkdir()
+    (provenance / "training_commit.txt").write_text(
+        training_commit + "\n",
+        encoding="utf-8",
+    )
+    window_contracts = {
+        "midpoint": {
+            **_window_contract(
+                sample_plan="midpoint-samples",
+                action_plan="midpoint-actions",
+            ),
+            "eval_seeds": [37],
+            "num_eval_samples": 2,
+            "num_rounds": 2,
+        },
+        "first-death": {
+            **_window_contract(
+                sample_plan="death-samples",
+                action_plan="death-actions",
+            ),
+            "eval_seeds": [37],
+            "num_eval_samples": 2,
+            "num_rounds": 2,
+        },
+    }
+    baseline_config = {"schema_version": 1, "purpose": "test"}
+    for arm, checkpoint_hash in (("true", "true-hash"), ("shuffled", "shuffle-hash")):
+        arm_dir = tmp_path / arm
+        arm_dir.mkdir()
+        checkpoint = arm_dir / "latest.pt"
+        checkpoint.touch()
+        (arm_dir / "config.json").write_text(
+            json.dumps(
+                {
+                    "action_mode": arm,
+                    "baseline_config": baseline_config,
+                    "val_every": 2500,
+                }
+            ),
+            encoding="utf-8",
+        )
+        inline_rows = []
+        for step in (2500, 5000):
+            inline_rows.extend(
+                [
+                    {
+                        "kind": "validation",
+                        "step": step,
+                        "weights": "ema",
+                        "true": {"val_mse": 0.2},
+                        "shuffled": {"val_mse": 0.3},
+                        "shuffled_minus_true_mse": 0.1,
+                    },
+                    {
+                        "kind": "rollout",
+                        "step": step,
+                        "weights": "ema",
+                        "true": {"rollout_mse_per_step": [0.2, 0.3]},
+                        "shuffled": {"rollout_mse_per_step": [0.25, 0.35]},
+                        "true_mse_mean": 0.25,
+                        "shuffled_mse_mean": 0.3,
+                        "shuffled_minus_true_mse_mean": 0.05,
+                    },
+                ]
+            )
+        (arm_dir / "metrics.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in inline_rows),
+            encoding="utf-8",
+        )
+        for window_mode, contract in window_contracts.items():
+            evaluation = arm_dir / "evaluation" / window_mode
+            evaluation.mkdir(parents=True)
+            summary = {
+                **contract,
+                "checkpoint": str(checkpoint),
+                "checkpoint_sha256": checkpoint_hash,
+                "checkpoint_step": 5000,
+                "means": _summary(arm)["means"],
+            }
+            (evaluation / "summary.json").write_text(
+                json.dumps(summary),
+                encoding="utf-8",
+            )
+            (evaluation / "per_sample_metrics.jsonl").write_text(
+                "".join(json.dumps(row) + "\n" for row in _rows(arm)),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "summarize_diamond_rebuttal",
+            "--run-root",
+            str(tmp_path),
+            "--expected-step",
+            "5000",
+            "--expected-samples",
+            "2",
+            "--expected-training-commit",
+            training_commit,
+        ],
+    )
+    summarize_main()
+
+    output = json.loads(
+        (tmp_path / "evaluation" / "rebuttal_summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert output["schema_version"] == 2
+    assert output["contract"]["manifest_sha256"] == "manifest"
+    assert "sample_plan_sha256" not in output["contract"]
+    assert (
+        output["contract_by_window"]["midpoint"]["sample_plan_sha256"]
+        == "midpoint-samples"
+    )
+    assert (
+        output["contract_by_window"]["first-death"]["sample_plan_sha256"]
+        == "death-samples"
+    )
+    markdown = (tmp_path / "evaluation" / "rebuttal_summary.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Test samples: 2 POV rows" in markdown
