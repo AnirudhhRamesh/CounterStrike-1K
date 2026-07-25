@@ -25,6 +25,8 @@ def _rows(training_arm: str) -> list[dict]:
                 "action_mode": mode,
                 "sample_key": f"{round_id}-p0",
                 "round_id": round_id,
+                "rollout_valid_steps": [True, False],
+                "rollout_valid_count": 1,
             }
             row.update({metric: values[mode] for metric in METRICS})
             rows.append(row)
@@ -56,6 +58,15 @@ def test_cross_arm_summary_reports_sensitivity_and_difference_in_differences() -
     assert metric["within_checkpoint_action_sensitivity"]["shuffled"]["mean"] == 0.5
     assert metric["action_sensitivity_difference_in_differences"]["mean"] == 1.5
     assert metric["training_effect"]["true"]["mean"] == 1.0
+    assert result["rollout_target_validity"] == {
+        "num_eval_samples": 2,
+        "rollout_steps": 2,
+        "valid_count_distribution": {"1": 2},
+        "valid_target_steps": 2,
+        "planned_target_steps": 4,
+        "masked_post_alive_target_steps": 2,
+        "one_step_targets_all_valid": True,
+    }
 
 
 def test_training_audit_checks_arm_identity_and_checkpoint_reuse(tmp_path) -> None:

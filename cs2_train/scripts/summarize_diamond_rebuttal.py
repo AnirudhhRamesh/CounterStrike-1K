@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -297,7 +297,53 @@ def summarize_window(
     shuffled_rows: list[dict],
     bootstrap_seed: int,
 ) -> dict:
+    def rollout_validity(rows: list[dict]) -> dict | None:
+        rows_with_masks = [
+            row
+            for row in rows
+            if "rollout_valid_steps" in row and "rollout_valid_count" in row
+        ]
+        if not rows_with_masks:
+            return None
+        masks_by_sample: dict[int, tuple[bool, ...]] = {}
+        for row in rows_with_masks:
+            dataset_index = int(row["dataset_index"])
+            mask = tuple(bool(value) for value in row["rollout_valid_steps"])
+            prior = masks_by_sample.setdefault(dataset_index, mask)
+            if prior != mask:
+                raise ValueError(
+                    f"rollout validity mask differs for dataset row {dataset_index}"
+                )
+            if int(row["rollout_valid_count"]) != sum(mask):
+                raise ValueError(
+                    f"rollout valid-count mismatch for dataset row {dataset_index}"
+                )
+        counts = Counter(sum(mask) for mask in masks_by_sample.values())
+        rollout_steps = len(next(iter(masks_by_sample.values())))
+        valid_steps = sum(count * frequency for count, frequency in counts.items())
+        return {
+            "num_eval_samples": len(masks_by_sample),
+            "rollout_steps": rollout_steps,
+            "valid_count_distribution": {
+                str(count): int(frequency) for count, frequency in sorted(counts.items())
+            },
+            "valid_target_steps": int(valid_steps),
+            "planned_target_steps": len(masks_by_sample) * rollout_steps,
+            "masked_post_alive_target_steps": (
+                len(masks_by_sample) * rollout_steps - int(valid_steps)
+            ),
+            "one_step_targets_all_valid": all(mask[0] for mask in masks_by_sample.values()),
+        }
+
+    validity_by_arm = {
+        "true": rollout_validity(true_rows),
+        "shuffled": rollout_validity(shuffled_rows),
+    }
+    if validity_by_arm["true"] != validity_by_arm["shuffled"]:
+        raise ValueError("training arms use different rollout target-validity masks")
     output: dict[str, dict] = {}
+    if validity_by_arm["true"] is not None:
+        output["rollout_target_validity"] = validity_by_arm["true"]
     for metric_index, metric in enumerate(METRICS):
         maps = {
             "true": row_map(true_rows, metric),
@@ -407,10 +453,24 @@ def render_markdown(summary: dict) -> str:
         "",
     ]
     for window_mode, window in summary["windows"].items():
+        validity = window.get("rollout_target_validity")
         lines.extend(
             [
                 f"## {window_mode}",
                 "",
+                *(
+                    [
+                        (
+                            f"- Valid rollout targets: {validity['valid_target_steps']:,} / "
+                            f"{validity['planned_target_steps']:,}; masked post-alive targets: "
+                            f"{validity['masked_post_alive_target_steps']:,}"
+                        ),
+                        f"- Valid-step count distribution: {validity['valid_count_distribution']}",
+                        "",
+                    ]
+                    if validity is not None
+                    else []
+                ),
                 "| Metric | True-trained action sensitivity | Shuffled-trained action sensitivity | Difference in differences | True-action training effect |",
                 "|---|---:|---:|---:|---:|",
             ]
