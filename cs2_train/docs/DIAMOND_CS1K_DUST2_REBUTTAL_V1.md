@@ -169,7 +169,8 @@ evaluation seeds across the two checkpoint arms. It writes:
 
 - `evaluation/rebuttal_summary.json`, with machine-readable checkpoint means,
   within-checkpoint action sensitivity, true-versus-shuffled training effects,
-  and the action-sensitivity difference in differences;
+  the action-sensitivity difference in differences, and the complete paired
+  2,500-step inline validation/rollout trajectory for both training arms;
 - `evaluation/rebuttal_summary.md`, with a compact table of the same
   round-clustered 95% bootstrap intervals.
 

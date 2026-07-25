@@ -190,6 +190,13 @@ def validate_training_runs(
         "ema_decay",
         "mixed_precision",
         "deterministic",
+        "val_every",
+        "rollout_every",
+        "rollout_steps",
+        "val_batch_size",
+        "val_denoise_steps",
+        "val_s_cond",
+        "use_ema_for_val",
     )
     for field in comparable_fields:
         if configs["true"].get(field) != configs["shuffled"].get(field):
@@ -208,6 +215,77 @@ def validate_training_runs(
         },
         "checkpoint_sha256_by_arm": checkpoint_hashes,
     }
+
+
+def load_inline_trajectory(
+    run_root: Path,
+    *,
+    expected_step: int,
+    cadence: int,
+) -> dict[str, list[dict]]:
+    if expected_step <= 0 or cadence <= 0 or expected_step % cadence:
+        raise ValueError("endpoint must be a positive multiple of trajectory cadence")
+    expected_steps = list(range(cadence, expected_step + 1, cadence))
+    output = {}
+    for arm in TRAINING_ARMS:
+        rows = load_jsonl(run_root / arm / "metrics.jsonl")
+        by_key: dict[tuple[str, int], dict] = {}
+        duplicates: dict[tuple[str, int], int] = defaultdict(int)
+        for row in rows:
+            kind = str(row.get("kind", ""))
+            if kind not in {"validation", "rollout"}:
+                continue
+            key = (kind, int(row["step"]))
+            duplicates[key] += 1
+            if key in by_key and row != by_key[key]:
+                raise ValueError(f"{arm}: conflicting duplicate inline metric {key}")
+            by_key[key] = row
+
+        arm_steps = sorted({step for _kind, step in by_key})
+        if arm_steps != expected_steps:
+            raise ValueError(
+                f"{arm}: inline evaluation steps {arm_steps} != {expected_steps}"
+            )
+        trajectory = []
+        for step in expected_steps:
+            validation = by_key[("validation", step)]
+            rollout = by_key[("rollout", step)]
+            trajectory.append(
+                {
+                    "step": step,
+                    "weights": validation["weights"],
+                    "one_step": {
+                        "true_mse": float(validation["true"]["val_mse"]),
+                        "shuffled_mse": float(validation["shuffled"]["val_mse"]),
+                        "shuffled_minus_true_mse": float(
+                            validation["shuffled_minus_true_mse"]
+                        ),
+                    },
+                    "rollout": {
+                        "true_mse_mean": float(rollout["true_mse_mean"]),
+                        "shuffled_mse_mean": float(rollout["shuffled_mse_mean"]),
+                        "shuffled_minus_true_mse_mean": float(
+                            rollout["shuffled_minus_true_mse_mean"]
+                        ),
+                        "true_mse_per_step": [
+                            float(value)
+                            for value in rollout["true"]["rollout_mse_per_step"]
+                        ],
+                        "shuffled_mse_per_step": [
+                            float(value)
+                            for value in rollout["shuffled"][
+                                "rollout_mse_per_step"
+                            ]
+                        ],
+                    },
+                    "duplicate_records": {
+                        kind: duplicates[(kind, step)]
+                        for kind in ("validation", "rollout")
+                    },
+                }
+            )
+        output[arm] = trajectory
+    return output
 
 
 def summarize_window(
@@ -398,6 +476,11 @@ def main() -> None:
         summaries,
         expected_training_commit=args.expected_training_commit,
     )
+    inline_trajectory = load_inline_trajectory(
+        args.run_root,
+        expected_step=args.expected_step,
+        cadence=int(training_audit["matched_training_fields"]["val_every"]),
+    )
     contract = {}
     windows = {}
     for window_index, window_mode in enumerate(WINDOW_MODES):
@@ -428,6 +511,7 @@ def main() -> None:
         "status": "complete",
         "endpoint_step": args.expected_step,
         "training_audit": training_audit,
+        "inline_validation_trajectory": inline_trajectory,
         "contract": contract,
         "checkpoint_sha256": {
             key: summary["checkpoint_sha256"] for key, summary in summaries.items()

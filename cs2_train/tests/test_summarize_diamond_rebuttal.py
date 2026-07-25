@@ -5,6 +5,7 @@ import json
 from cs2_train.scripts.summarize_diamond_rebuttal import (
     ACTION_MODES,
     METRICS,
+    load_inline_trajectory,
     summarize_window,
     validate_training_runs,
 )
@@ -96,3 +97,47 @@ def test_training_audit_checks_arm_identity_and_checkpoint_reuse(tmp_path) -> No
         "shuffled": "shuffled",
     }
     assert result["checkpoint_sha256_by_arm"]["true"] == "true-hash"
+
+
+def test_inline_trajectory_requires_every_paired_checkpoint(tmp_path) -> None:
+    for arm, offset in (("true", 0.0), ("shuffled", 0.1)):
+        arm_dir = tmp_path / arm
+        arm_dir.mkdir()
+        rows = []
+        for step in (2500, 5000):
+            rows.extend(
+                [
+                    {
+                        "kind": "validation",
+                        "step": step,
+                        "weights": "ema",
+                        "true": {"val_mse": 0.2 + offset},
+                        "shuffled": {"val_mse": 0.3 + offset},
+                        "shuffled_minus_true_mse": 0.1,
+                    },
+                    {
+                        "kind": "rollout",
+                        "step": step,
+                        "weights": "ema",
+                        "true": {"rollout_mse_per_step": [0.2, 0.3]},
+                        "shuffled": {"rollout_mse_per_step": [0.25, 0.35]},
+                        "true_mse_mean": 0.25,
+                        "shuffled_mse_mean": 0.3,
+                        "shuffled_minus_true_mse_mean": 0.05,
+                    },
+                ]
+            )
+        (arm_dir / "metrics.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+
+    result = load_inline_trajectory(
+        tmp_path,
+        expected_step=5000,
+        cadence=2500,
+    )
+
+    assert [row["step"] for row in result["true"]] == [2500, 5000]
+    assert result["true"][0]["one_step"]["shuffled_minus_true_mse"] == 0.1
+    assert result["shuffled"][1]["rollout"]["true_mse_per_step"] == [0.2, 0.3]
