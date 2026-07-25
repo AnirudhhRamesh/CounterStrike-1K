@@ -183,6 +183,14 @@ A positive value means that aligned-action training increased sensitivity to
 the correct held-out action sequence beyond any sensitivity learned by the
 shuffled control.
 
+The inline trajectory is diagnostic only. At each checkpoint, true and
+shuffled actions share identical diffusion draws, but the deterministic sampler
+seed changes with checkpoint step. This makes every within-step action contrast
+paired while avoiding a claim that absolute MSE changes between inline
+checkpoints are a fixed-noise learning curve. The paper-facing endpoint instead
+uses the preregistered step-50,000 checkpoints, three fixed evaluation seeds,
+and all held-out test rows.
+
 Only after the audit succeeds, publish the sanitized summaries and a bounded
 set of review videos to the existing private S3 index:
 

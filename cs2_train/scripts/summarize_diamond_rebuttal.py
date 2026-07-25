@@ -511,7 +511,14 @@ def main() -> None:
         "status": "complete",
         "endpoint_step": args.expected_step,
         "training_audit": training_audit,
-        "inline_validation_trajectory": inline_trajectory,
+        "inline_validation_trajectory": {
+            "status": "diagnostic_only",
+            "rng_contract": (
+                "true and shuffled actions share diffusion draws within each "
+                "checkpoint; the deterministic seed changes with checkpoint step"
+            ),
+            "arms": inline_trajectory,
+        },
         "contract": contract,
         "checkpoint_sha256": {
             key: summary["checkpoint_sha256"] for key, summary in summaries.items()
