@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "amendment_name": "DIAMOND-CSGO-on-CounterStrike-1K-360p-Dust2-20k-resource-amendment-v1",
+  "status": "frozen-before-confirmatory-test-access",
+  "frozen_at_utc": "2026-07-25T23:55:00Z",
+  "reason": "The rebuttal evidence deadline is approximately 12 hours away; the original two-arm 50,000-step plan cannot finish before that deadline.",
+  "original_contract": {
+    "config": "diamond_cs1k_dust2_360p_rebuttal_v1.json",
+    "config_sha256": "9f612a74f09697c2cde4cfdc602f3bbd95b5be41f1319f7d58609ebc04102fa5",
+    "training_commit": "34524f6b6f1f805200d72ab4e77f3a55dd6415f8",
+    "optimizer_steps_per_arm": 50000,
+    "training_arms": [
+      "true",
+      "shuffled"
+    ]
+  },
+  "amended_contract": {
+    "checkpoint_arm": "true",
+    "checkpoint_step": 20000,
+    "checkpoint_rule": "Use the atomic step_0020000.pt checkpoint from the already-running aligned-action trajectory. The stopping decision is based only on wall-clock resources and is not selected by held-out test quality.",
+    "trained_arms": [
+      "true"
+    ],
+    "skipped_training_arms": [
+      "shuffled"
+    ],
+    "evaluation_windows": [
+      "midpoint",
+      "first-death"
+    ],
+    "evaluation_seeds": [
+      37,
+      41,
+      43
+    ],
+    "evaluation_action_modes": [
+      "true",
+      "shuffled",
+      "zeros"
+    ],
+    "test_rounds": 69,
+    "test_pov_rows": 690,
+    "uncertainty": "95% percentile bootstrap intervals clustered by round_id with 10000 replicates.",
+    "rollout_archive": true,
+    "motion_metric": "torchvision RAFT-Small C_T_V2 paired optical-flow dynamics"
+  },
+  "claim_boundary": {
+    "allowed": "Within-checkpoint action-conditioning sensitivity of the 20,000-step aligned-action DIAMOND model.",
+    "prohibited": [
+      "A matched trained true-versus-shuffled model comparison.",
+      "The preregistered 50,000-step endpoint.",
+      "A converged or full-budget upstream DIAMOND reproduction.",
+      "A difference-in-differences claim across training arms."
+    ]
+  },
+  "unchanged": [
+    "Dataset manifest, split, map, action alignment, architecture, optimizer trajectory through step 20,000, evaluation windows, evaluation seeds, action interventions, paired RNG, round-clustered uncertainty, and private review policy."
+  ]
+}

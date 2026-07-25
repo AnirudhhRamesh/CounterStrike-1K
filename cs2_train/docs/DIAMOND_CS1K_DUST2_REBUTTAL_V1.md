@@ -7,6 +7,30 @@ frozen before confirmatory training in
 The corrected production training/evaluation code is frozen at
 `34524f6b6f1f805200d72ab4e77f3a55dd6415f8`.
 
+## Pre-test 20k resource amendment
+
+On 2026-07-25 UTC, with approximately 12 hours remaining before the rebuttal
+evidence deadline and before opening the confirmatory test split, the compute
+plan was shortened. The already-running aligned-action trajectory stops at its
+atomic step-20,000 checkpoint. The separately trained shuffled-action arm is
+not run. This decision is based on elapsed compute and the submission
+deadline, not held-out test quality.
+
+The original 50,000-step, two-training-arm contract below is retained as the
+superseded plan. The machine-readable amendment is
+`configs/diamond_cs1k_dust2_360p_20k_resource_amendment_v1.json`. The amended
+endpoint evaluates the single aligned-trained checkpoint on all 69 test
+rounds / 690 POVs under true, cross-round shuffled, and zero action inputs at
+midpoint and first-death windows with seeds 37, 41, and 43. Videos and
+diffusion random draws remain paired, and both the rollout archive and fixed
+RAFT motion endpoint are retained.
+
+The amended claim is strictly within-checkpoint action-conditioning
+sensitivity at step 20,000. It is not a matched trained-model comparison, a
+difference-in-differences result, the original 50,000-step endpoint, or a
+full-budget upstream DIAMOND reproduction. The step-20,000 training trajectory
+itself is unchanged from the original frozen config.
+
 ## Question and endpoint
 
 The experiment asks whether the DIAMOND-CSGO world model uses aligned player
@@ -248,6 +272,17 @@ PYTHON_BIN="$PWD/.venv/bin/python" \
 DATA_DIR=/data/cs1k-360p \
 RUN_ROOT=/runs/diamond-cs1k-dust2-360p-rebuttal-v1 \
 bash cs2_train/scripts/run_diamond_cs1k_dust2_rebuttal_v1.sh
+```
+
+For the deadline-driven step-20,000 amendment, evaluate the existing atomic
+checkpoint from a reviewed clean analysis commit:
+
+```bash
+EXPECTED_ANALYSIS_COMMIT="$(git rev-parse HEAD)" \
+PYTHON_BIN="$PWD/.venv/bin/python" \
+DATA_DIR=/data/cs1k-360p \
+RUN_ROOT=/runs/diamond-cs1k-dust2-360p-rebuttal-v2 \
+bash cs2_train/scripts/run_diamond_cs1k_dust2_20k_endpoint.sh
 ```
 
 The launcher refuses a dirty tracked worktree, verifies the two dataset hashes,
