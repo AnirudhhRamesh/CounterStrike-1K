@@ -52,6 +52,21 @@ uv run python -m cs2_train.src.train \
 For the action-conditioning ablation, replace `--action-mode true` with
 `--action-mode shuffled` or `--action-mode zeros`.
 
+## Dust2 360p rebuttal reproduction
+
+The current matched-compute, Dust2-only action-sensitivity experiment is frozen
+in `configs/diamond_cs1k_dust2_360p_rebuttal_v1.json`. See
+`docs/DIAMOND_CS1K_DUST2_REBUTTAL_V1.md` for the exact data, model, compute,
+shuffle, paired-RNG evaluation, and private review-publishing contracts.
+
+Run the checked launcher from a clean checkout:
+
+```bash
+bash cs2_train/scripts/run_diamond_cs1k_dust2_rebuttal_v1.sh
+```
+
+This is separate from the historical Table 11 reproduction below.
+
 ## Paper Table 11 reproduction
 
 The completed true-action job in the paper ran for 30,000 steps on four L40S

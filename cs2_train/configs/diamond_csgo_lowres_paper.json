@@ -54,6 +54,7 @@
     "resize": [36, 64],
     "cond_frames": 4,
     "num_autoregressive_steps": 4,
+    "target_fps": 32,
     "stride": 1,
     "batch_size": 16,
     "grad_acc": 8,

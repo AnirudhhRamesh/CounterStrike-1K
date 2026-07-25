@@ -62,8 +62,8 @@ def rollout_one_step(
         ),
     )
 
-    prev_obs = batch.obs[:, :n].contiguous()        # (b, n, c, h, w)
-    prev_act = batch.act[:, :n].contiguous()        # (b, n, num_actions)
+    prev_obs = batch.obs[:, :n].contiguous()  # (b, n, c, h, w)
+    prev_act = batch.act[:, :n].contiguous()  # (b, n, num_actions)
     pred, _trajectory = sampler.sample(prev_obs, prev_act)
     return pred  # (b, c, h, w) in [-1, 1]
 
@@ -84,9 +84,9 @@ def make_grid(
     """Build a (rows = samples, cols = n_cond + 3) image grid.
     Last 3 cols are: predicted next, ground-truth next, |diff|."""
     b = min(max_rows, batch.obs.size(0))
-    obs = batch.obs[:b]                              # (b, T, c, h, w)
-    gt_next = obs[:, n_cond]                         # (b, c, h, w)
-    diff = (pred_next[:b] - gt_next).abs() / 2.0     # in [0, 1] roughly
+    obs = batch.obs[:b]  # (b, T, c, h, w)
+    gt_next = obs[:, n_cond]  # (b, c, h, w)
+    diff = (pred_next[:b] - gt_next).abs() / 2.0  # in [0, 1] roughly
 
     n_cols = n_cond + 3
     fig, axes = plt.subplots(b, n_cols, figsize=(2.0 * n_cols, 2.0 * b), squeeze=False)
@@ -122,6 +122,7 @@ def run_validation(
     s_cond: float = 0.0,
     max_rows: int = 4,
     save_png: bool = True,
+    tag: str | None = None,
 ) -> dict:
     """Predict on val_batch, save PNG, return scalar metrics.
 
@@ -149,9 +150,15 @@ def run_validation(
     image_path = None
     if save_png:
         out_dir.mkdir(parents=True, exist_ok=True)
-        fig = make_grid(val_batch, pred, n_cond=n, max_rows=max_rows,
-                        title=f"step {step}  val_mse={mse:.4f}  val_psnr={psnr:.2f} dB")
-        image_path = out_dir / f"val_step_{step:07d}.png"
+        fig = make_grid(
+            val_batch,
+            pred,
+            n_cond=n,
+            max_rows=max_rows,
+            title=f"{tag or 'val'} step {step}  val_mse={mse:.4f}  val_psnr={psnr:.2f} dB",
+        )
+        prefix = f"val_{tag}" if tag else "val"
+        image_path = out_dir / f"{prefix}_step_{step:07d}.png"
         fig.savefig(image_path, dpi=110, bbox_inches="tight")
         plt.close(fig)
 
@@ -202,12 +209,14 @@ def rollout_autoregressive(
             s_cond=s_cond,
         ),
     )
-    obs = batch.obs.contiguous()                     # (b, T, c, h, w)
-    act = batch.act.contiguous()                     # (b, T, A)
+    obs = batch.obs.contiguous()  # (b, T, c, h, w)
+    act = batch.act.contiguous()  # (b, T, A)
     T = obs.size(1)
-    assert num_steps <= T - n, f"num_steps={num_steps} exceeds available next frames ({T - n})"
+    assert num_steps <= T - n, (
+        f"num_steps={num_steps} exceeds available next frames ({T - n})"
+    )
 
-    cond_obs = obs[:, :n].clone()                    # (b, n, c, h, w)
+    cond_obs = obs[:, :n].clone()  # (b, n, c, h, w)
     preds: list[torch.Tensor] = []
     for i in range(num_steps):
         cond_act = act[:, i : n + i].contiguous()
@@ -215,13 +224,20 @@ def rollout_autoregressive(
         preds.append(pred)
         # Slide window: drop oldest cond frame, append pred.
         cond_obs = torch.cat([cond_obs[:, 1:], pred.unsqueeze(1)], dim=1)
-    return torch.stack(preds, dim=1)                  # (b, num_steps, c, h, w)
+    return torch.stack(preds, dim=1)  # (b, num_steps, c, h, w)
 
 
 def _frames_to_uint8(frames: torch.Tensor) -> np.ndarray:
     """(N, C, H, W) in [-1, 1] -> (N, H, W, C) uint8."""
     return (
-        frames.detach().float().cpu().clamp(-1, 1).add(1).div(2).mul(255).byte()
+        frames.detach()
+        .float()
+        .cpu()
+        .clamp(-1, 1)
+        .add(1)
+        .div(2)
+        .mul(255)
+        .byte()
         .permute(0, 2, 3, 1)
         .numpy()
     )
@@ -240,10 +256,14 @@ def save_rollout_gif(
     vertically; pred on the left, gt on the right.
     """
     b = min(max_rows, pred.size(0))
-    pred_u8 = _frames_to_uint8(pred[:b].reshape(-1, *pred.shape[2:])).reshape(b, pred.size(1), *pred.shape[3:5], 3)
-    gt_u8 = _frames_to_uint8(gt[:b].reshape(-1, *gt.shape[2:])).reshape(b, gt.size(1), *gt.shape[3:5], 3)
+    pred_u8 = _frames_to_uint8(pred[:b].reshape(-1, *pred.shape[2:])).reshape(
+        b, pred.size(1), *pred.shape[3:5], 3
+    )
+    gt_u8 = _frames_to_uint8(gt[:b].reshape(-1, *gt.shape[2:])).reshape(
+        b, gt.size(1), *gt.shape[3:5], 3
+    )
     # Stack: pred|gt horizontally per row, then rows vertically.
-    side = np.concatenate([pred_u8, gt_u8], axis=3)              # (b, T, h, 2w, 3)
+    side = np.concatenate([pred_u8, gt_u8], axis=3)  # (b, T, h, 2w, 3)
     canvas = side.transpose(1, 0, 2, 3, 4).reshape(side.shape[1], -1, side.shape[3], 3)
     # canvas: (T, b*h, 2w, 3)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -263,6 +283,7 @@ def run_rollout_validation(
     s_cond: float = 0.0,
     max_rows: int = 4,
     fps: int = 10,
+    tag: str | None = None,
 ) -> dict:
     """Run a multi-step autoregressive rollout, save GIF, return paths + metrics.
 
@@ -283,13 +304,14 @@ def run_rollout_validation(
         num_steps=steps,
         num_denoising_steps=num_denoising_steps,
         s_cond=s_cond,
-    )                                                            # (b, steps, c, h, w)
-    gt = val_batch.obs[:, n : n + steps]                          # (b, steps, c, h, w)
+    )  # (b, steps, c, h, w)
+    gt = val_batch.obs[:, n : n + steps]  # (b, steps, c, h, w)
 
     mse_per_step = ((pred - gt) ** 2).mean(dim=(0, 2, 3, 4)).tolist()
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    gif_path = out_dir / f"rollout_step_{step:07d}.gif"
+    prefix = f"rollout_{tag}" if tag else "rollout"
+    gif_path = out_dir / f"{prefix}_step_{step:07d}.gif"
     save_rollout_gif(pred, gt, gif_path, fps=fps, max_rows=max_rows)
 
     if was_training:
