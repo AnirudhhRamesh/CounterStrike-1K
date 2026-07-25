@@ -51,5 +51,13 @@ jobs:
       - name: Run the release tests
         run: uv run --frozen --with pytest==9.1.1 pytest -q cs2_train/tests
 
-      - name: Build the source distribution and wheel
-        run: uv build
+      - name: Build byte-reproducible release artifacts
+        shell: bash
+        run: |
+          uv build
+          second_build_dir="$(mktemp -d)"
+          uv build --out-dir "${second_build_dir}"
+          sha256sum dist/*
+          for artifact in dist/*; do
+            cmp "${artifact}" "${second_build_dir}/$(basename "${artifact}")"
+          done

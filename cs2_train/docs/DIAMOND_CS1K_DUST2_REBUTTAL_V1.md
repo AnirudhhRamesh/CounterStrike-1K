@@ -158,7 +158,8 @@ uv run --frozen --with pytest==9.1.1 pytest -q cs2_train/tests
 Pull requests touching the DIAMOND adapter run this exact command on Python
 3.12 in `.github/workflows/diamond-cs1k-tests.yml`. The workflow pins every
 third-party GitHub Action by commit SHA and pins the `uv` and `pytest`
-versions, then builds the source distribution and wheel.
+versions, then builds the source distribution and wheel twice and requires
+byte-identical archives.
 
 Run both arms and both confirmatory evaluations:
 
