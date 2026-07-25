@@ -107,6 +107,20 @@ windows per arm. AdamW uses learning rate `1e-4`, weight decay `1e-2`, epsilon
 Deterministic PyTorch algorithms and `CUBLAS_WORKSPACE_CONFIG=:4096:8` are
 enabled.
 
+### Training-budget classification
+
+This is a controlled matched-compute action-sensitivity study, not a
+full-budget reproduction of upstream DIAMOND-CSGO. The upstream paper config
+uses 240,000 optimizer steps at effective batch 128, or 30.72 million sampled
+sequences. The frozen study uses 4.00 million sequences per arm, approximately
+13.0% of that sequence exposure.
+
+The confirmatory claim is limited to the paired aligned-versus-shuffled action
+contrast under the fixed 50k budget. The 50k result must not be labeled as the
+full upstream B1 baseline. A full-budget reproduction or a matched post-50k
+extension is a separately preregistered experiment and cannot replace this
+endpoint.
+
 ## Paired evaluation
 
 Inline validation runs every 2,500 steps. True and shuffled action inputs use
