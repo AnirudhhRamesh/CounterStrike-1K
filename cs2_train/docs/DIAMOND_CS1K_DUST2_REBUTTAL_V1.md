@@ -161,9 +161,11 @@ python -m cs2_train.scripts.summarize_diamond_rebuttal \
 ```
 
 The audit refuses to summarize an incomplete or mismatched experiment. It
-requires the same manifest, config, checkpoint step, sample plan, held-out
-action-donor plan, action modes, rollout settings, and evaluation seeds across
-the two checkpoint arms. It writes:
+requires the pinned training commit, the declared arm identity, matched
+training hyperparameters, one final checkpoint per arm, distinct checkpoint
+hashes between arms, and the same manifest, evaluator config, checkpoint step,
+sample plan, held-out action-donor plan, action modes, rollout settings, and
+evaluation seeds across the two checkpoint arms. It writes:
 
 - `evaluation/rebuttal_summary.json`, with machine-readable checkpoint means,
   within-checkpoint action sensitivity, true-versus-shuffled training effects,

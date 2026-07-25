@@ -18,6 +18,7 @@ METRICS = (
 WINDOW_MODES = ("midpoint", "first-death")
 TRAINING_ARMS = ("true", "shuffled")
 ACTION_MODES = ("true", "shuffled", "zeros")
+TRAINING_COMMIT = "a5566a05292088b0a5ac108388f90d074890d278"
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -123,6 +124,90 @@ def validate_contract(
     if first["split"] != "test" or first["map_slug"] != "dust2":
         raise ValueError("confirmatory summary is not the Dust2 test split")
     return {field: first[field] for field in identical_fields}
+
+
+def validate_training_runs(
+    run_root: Path,
+    summaries: dict[str, dict],
+    *,
+    expected_training_commit: str,
+) -> dict:
+    recorded_commit = (
+        run_root / "provenance" / "training_commit.txt"
+    ).read_text(encoding="utf-8").strip()
+    if recorded_commit != expected_training_commit:
+        raise ValueError(
+            f"training commit {recorded_commit!r} != {expected_training_commit!r}"
+        )
+
+    configs = {}
+    checkpoint_hashes = {}
+    for arm in TRAINING_ARMS:
+        config = json.loads(
+            (run_root / arm / "config.json").read_text(encoding="utf-8")
+        )
+        if config.get("action_mode") != arm:
+            raise ValueError(
+                f"{arm}: recorded action mode {config.get('action_mode')!r}"
+            )
+        configs[arm] = config
+
+        arm_summaries = [
+            summaries[f"{arm}/{window_mode}"] for window_mode in WINDOW_MODES
+        ]
+        arm_hashes = {summary["checkpoint_sha256"] for summary in arm_summaries}
+        if len(arm_hashes) != 1:
+            raise ValueError(f"{arm}: window evaluations use different checkpoints")
+        checkpoint_hashes[arm] = next(iter(arm_hashes))
+        expected_checkpoint = (run_root / arm / "latest.pt").resolve()
+        for summary in arm_summaries:
+            if Path(summary["checkpoint"]).resolve() != expected_checkpoint:
+                raise ValueError(
+                    f"{arm}: evaluator did not use {expected_checkpoint}"
+                )
+
+    if checkpoint_hashes["true"] == checkpoint_hashes["shuffled"]:
+        raise ValueError("training arms unexpectedly use the same checkpoint")
+    if configs["true"]["baseline_config"] != configs["shuffled"]["baseline_config"]:
+        raise ValueError("training arms use different frozen baseline configs")
+
+    comparable_fields = (
+        "seed",
+        "action_shuffle_seed",
+        "max_steps",
+        "batch_size",
+        "grad_acc",
+        "target_fps",
+        "manifest_name",
+        "map_slug",
+        "resolution",
+        "preset",
+        "resize",
+        "num_autoregressive_steps",
+        "lr",
+        "lr_warmup",
+        "weight_decay",
+        "ema_decay",
+        "mixed_precision",
+        "deterministic",
+    )
+    for field in comparable_fields:
+        if configs["true"].get(field) != configs["shuffled"].get(field):
+            raise ValueError(
+                f"training arms differ on {field}: "
+                f"{configs['true'].get(field)!r} != "
+                f"{configs['shuffled'].get(field)!r}"
+            )
+    return {
+        "training_commit": recorded_commit,
+        "action_mode_by_arm": {
+            arm: configs[arm]["action_mode"] for arm in TRAINING_ARMS
+        },
+        "matched_training_fields": {
+            field: configs["true"].get(field) for field in comparable_fields
+        },
+        "checkpoint_sha256_by_arm": checkpoint_hashes,
+    }
 
 
 def summarize_window(
@@ -291,6 +376,10 @@ def main() -> None:
     parser.add_argument("--expected-step", type=int, default=50_000)
     parser.add_argument("--expected-samples", type=int, default=690)
     parser.add_argument("--bootstrap-seed", type=int, default=20250725)
+    parser.add_argument(
+        "--expected-training-commit",
+        default=TRAINING_COMMIT,
+    )
     args = parser.parse_args()
 
     summaries: dict[str, dict] = {}
@@ -304,6 +393,11 @@ def main() -> None:
             )
             rows[key] = load_jsonl(evaluation / "per_sample_metrics.jsonl")
 
+    training_audit = validate_training_runs(
+        args.run_root,
+        summaries,
+        expected_training_commit=args.expected_training_commit,
+    )
     contract = {}
     windows = {}
     for window_index, window_mode in enumerate(WINDOW_MODES):
@@ -333,6 +427,7 @@ def main() -> None:
         "schema_version": 1,
         "status": "complete",
         "endpoint_step": args.expected_step,
+        "training_audit": training_audit,
         "contract": contract,
         "checkpoint_sha256": {
             key: summary["checkpoint_sha256"] for key, summary in summaries.items()
