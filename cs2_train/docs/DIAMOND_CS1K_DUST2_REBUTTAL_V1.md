@@ -98,6 +98,13 @@ grids and eight-step rollouts are written locally and to a private,
 AES-256-encrypted S3 prefix. The owner-only review site polls a pre-signed
 index; checkpoints and optimizer state are never published.
 
+Because the GPU host uses a rotating instance-role session, a separate
+`publish_signed_review_index.py` process runs under non-session reviewer
+credentials. It polls the raw private index, replaces artifact links with
+seven-day pre-signed URLs, and updates a stable private viewer index. The
+publisher refuses temporary credentials by default so a nominal seven-day URL
+cannot silently expire with a shorter role session.
+
 After both training endpoints are complete, each final checkpoint is evaluated
 on all 690 test POV rows at:
 
