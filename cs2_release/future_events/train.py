@@ -1,4 +1,4 @@
-"""Compare single, synchronized-10, and shuffled-10 future-event probes.
+"""Compare single, synchronized-10, and cross-round-10 future-event probes.
 
 Two preregistered feature modes are supported:
 
@@ -10,9 +10,11 @@ Two preregistered feature modes are supported:
 
 ``checkpoint-representations``
     Each arm reads causal context features from its corresponding frozen MIRA
-    checkpoint.  Synchronized and shuffled both receive the identical held-out
-    synchronized ten-POV context; the checkpoints differ only in their training
-    grouping.  This is the model-level synchronized-training control.
+    checkpoint.  Synchronized and cross-round grouped models both receive the
+    identical held-out synchronized ten-POV context; the checkpoints differ
+    only in their training grouping.  This is the model-level
+    synchronized-training control.  ``shuffled`` remains the internal arm key
+    for backward compatibility; it never denotes shuffled actions here.
 """
 
 from __future__ import annotations
@@ -587,7 +589,8 @@ def main() -> int:
                 ),
                 "shuffled": (
                     "the identical ten held-out synchronized POVs represented by the frozen "
-                    "matched-information shuffled-trained MIRA checkpoint"
+                    "matched-information cross-round-grouped MIRA checkpoint; "
+                    "'shuffled' is only the backward-compatible internal arm key"
                 ),
             }
             if checkpoint_representations

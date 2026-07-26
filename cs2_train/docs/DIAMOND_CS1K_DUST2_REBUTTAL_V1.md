@@ -226,25 +226,25 @@ preserved:
 - attention depths `[0, 0, 1, 1]`;
 - model resolution 36 x 64 from the 360p source tier.
 
-The fixed training budget is 50,000 steps x 80 sequences = 4,000,000 sampled
-windows per arm. AdamW uses learning rate `1e-4`, weight decay `1e-2`, epsilon
+The reported resource-amended endpoint trains one aligned-action model for
+20,000 steps x 80 sequences = 1,600,000 sampled windows. AdamW uses learning
+rate `1e-4`, weight decay `1e-2`, epsilon
 `1e-8`, 100 warmup steps, gradient norm cap 10, and EMA decay 0.999.
 Deterministic PyTorch algorithms and `CUBLAS_WORKSPACE_CONFIG=:4096:8` are
 enabled.
 
 ### Training-budget classification
 
-This is a controlled matched-compute action-sensitivity study, not a
+This is a controlled within-checkpoint action-sensitivity study, not a
 full-budget reproduction of upstream DIAMOND-CSGO. The upstream paper config
 uses 240,000 optimizer steps at effective batch 128, or 30.72 million sampled
-sequences. The frozen study uses 4.00 million sequences per arm, approximately
-13.0% of that sequence exposure.
+sequences. The frozen study uses 1.60 million sequences, approximately 5.2% of
+that sequence exposure.
 
-The confirmatory claim is limited to the paired aligned-versus-shuffled action
-contrast under the fixed 50k budget. The 50k result must not be labeled as the
-full upstream B1 baseline. A full-budget reproduction or a matched post-50k
-extension is a separately preregistered experiment and cannot replace this
-endpoint.
+The claim is limited to paired true-versus-cross-round action inputs under the
+same aligned-trained step-20,000 checkpoint. No shuffled-action world model is
+trained or compared. The result must not be labeled as the full upstream B1
+baseline or as a converged model.
 
 ## Paired evaluation
 
@@ -261,8 +261,8 @@ seven-day pre-signed URLs, and updates a stable private viewer index. The
 publisher refuses temporary credentials by default so a nominal seven-day URL
 cannot silently expire with a shorter role session.
 
-After both training endpoints are complete, each final checkpoint is evaluated
-on all 690 test POV rows at:
+The single aligned-trained step-20,000 checkpoint is evaluated on all 690 test
+POV rows at:
 
 - one fixed midpoint window per POV;
 - one round-shared window centered on the round's first death.
@@ -348,7 +348,9 @@ third-party GitHub Action by commit SHA and pins the `uv` and `pytest`
 versions, then builds the source distribution and wheel twice and requires
 byte-identical archives.
 
-Run both arms and both confirmatory evaluations:
+The archived two-training-arm launcher remains available to reproduce the
+superseded 50,000-step plan, but it was not run and does not enter the reported
+result:
 
 ```bash
 PYTHON_BIN="$PWD/.venv/bin/python" \
@@ -441,11 +443,12 @@ the shuffled rollout redirects toward its donor action stream. All confidence
 intervals resample `round_id` and reuse the same bootstrap multiplicities for
 the real ceiling and every action mode.
 
-## Final audit and private review publication
+## Superseded two-training-arm audit (not used by the reported endpoint)
 
-The training launcher is deliberately frozen at the preregistered training
-commit. After its four confirmatory evaluations finish, run the cross-arm
-audit from the current analysis commit:
+The following cross-arm audit belongs only to the archived, unexecuted
+50,000-step plan. The reported step-20,000 result instead uses
+`audit_diamond_20k_endpoint.py` shown in the completed endpoint section above.
+If the archived plan is run as a separate future study, its cross-arm audit is:
 
 ```bash
 python -m cs2_train.scripts.summarize_diamond_rebuttal \

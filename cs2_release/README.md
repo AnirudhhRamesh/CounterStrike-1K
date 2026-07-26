@@ -157,7 +157,7 @@ support only. Test uncertainty uses a paired match-cluster bootstrap.
 
 For the model-level control, first extract context-only representations from
 the frozen single, synchronized-trained, and matched-information
-shuffled-trained MIRA checkpoints into `single/`, `synchronized/`, and
+cross-round-grouped MIRA checkpoints into `single/`, `synchronized/`, and
 `shuffled/` subdirectories with MIRA's
 `scripts/extract_cs2_future_event_features.py`, then run:
 
@@ -173,7 +173,9 @@ uv run python -m cs2_release.future_events.train \
 In this mode both ten-player checkpoints receive the exact same held-out
 synchronized contexts. Only their training grouping differs. The probe sees
 the last causal MIRA context representation; neither post-context frames nor
-post-context actions enter feature extraction.
+post-context actions enter feature extraction. `shuffled/` is retained only as
+the backward-compatible internal directory key; actions are never shuffled
+during this training control.
 
 ## Sharded embedding extraction (multi-GPU)
 
