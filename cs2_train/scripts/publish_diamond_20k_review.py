@@ -81,14 +81,28 @@ def main() -> None:
         evaluation = args.endpoint_root / window
         summary_path = evaluation / "summary.json"
         motion_path = evaluation / "motion_metrics" / "summary.json"
+        action_recoverability_path = (
+            evaluation / "action_recoverability" / "summary.json"
+        )
+        per_action_addendum_path = (
+            evaluation / "action_recoverability" / "per_action_addendum.json"
+        )
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
         motion = json.loads(motion_path.read_text(encoding="utf-8"))
+        action_recoverability = json.loads(
+            action_recoverability_path.read_text(encoding="utf-8")
+        )
+        per_action_addendum = json.loads(
+            per_action_addendum_path.read_text(encoding="utf-8")
+        )
         review_manifest = json.loads(
             (evaluation / "review_manifest.json").read_text(encoding="utf-8")
         )
         local_artifacts = {
             "evaluation_summary": summary_path,
             "motion_summary": motion_path,
+            "action_recoverability_summary": action_recoverability_path,
+            "per_action_addendum": per_action_addendum_path,
             "resource_amendment": amendment,
         }
         for index, item in enumerate(review_manifest[: args.videos_per_window]):
@@ -131,6 +145,10 @@ def main() -> None:
                 "paired_deltas": summary["paired_deltas"],
                 "motion_means": motion["means"],
                 "motion_paired_deltas": motion["paired_deltas"],
+                "action_recoverability_primary": action_recoverability["results"][
+                    "primary"
+                ],
+                "per_action_primary": per_action_addendum["per_class_primary"],
             },
         }
         update_index(
