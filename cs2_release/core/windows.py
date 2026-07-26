@@ -13,6 +13,8 @@ from cs2_release.core.io import (
     filter_manifest_for_subset,
     git_commit,
     load_release_tables,
+    read_parquet,
+    sha256_file,
     write_json,
 )
 
@@ -71,11 +73,27 @@ def build_windows(
     alive_only: bool,
     max_rounds_per_split: int | None,
     seed: int,
+    manifest_path: Path | None = None,
 ) -> pd.DataFrame:
-    manifest, round_index = load_release_tables(root)
+    default_manifest, round_index = load_release_tables(root)
+    manifest = read_parquet(manifest_path) if manifest_path is not None else default_manifest
     manifest = filter_manifest_for_subset(manifest, root=root, subset=subset)
     round_ids = set(manifest["round_id"].astype(str).tolist())
     rounds = round_index[round_index["round_id"].astype(str).isin(round_ids)].copy()
+    split_counts = manifest.groupby("round_id")["split"].nunique()
+    crossing = split_counts[split_counts != 1]
+    if len(crossing):
+        raise ValueError(
+            f"manifest contains {len(crossing)} rounds crossing splits; "
+            f"first: {crossing.index[0]}"
+        )
+    split_by_round = (
+        manifest[["round_id", "split"]]
+        .drop_duplicates("round_id")
+        .set_index("round_id")["split"]
+        .astype(str)
+    )
+    rounds["split"] = rounds["round_id"].astype(str).map(split_by_round)
     rounds = _select_rounds(
         rounds,
         split=split,
@@ -167,6 +185,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--subset", default=None)
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Optional split-override manifest; round_index still comes from --root.",
+    )
     parser.add_argument("--split", choices=["train", "val", "test"], default=None)
     parser.add_argument("--map-slug", default=None)
     parser.add_argument("--window-seconds", type=float, default=1.0)
@@ -191,6 +215,7 @@ def main() -> int:
         alive_only=not args.include_dead_tail,
         max_rounds_per_split=args.max_rounds_per_split,
         seed=args.seed,
+        manifest_path=args.manifest,
     )
     if windows.empty:
         raise RuntimeError("no valid synchronized windows were produced")
@@ -205,6 +230,8 @@ def main() -> int:
         "windows_per_round": args.windows_per_round,
         "alive_only": not args.include_dead_tail,
         "subset": args.subset,
+        "manifest": str(args.manifest) if args.manifest is not None else None,
+        "manifest_sha256": sha256_file(args.manifest) if args.manifest is not None else None,
         "split": args.split,
         "map_slug": args.map_slug,
         "max_rounds_per_split": args.max_rounds_per_split,

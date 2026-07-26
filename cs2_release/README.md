@@ -113,6 +113,48 @@ torchrun --nproc_per_node=4 -m cs2_train.src.train \
   --val-every 1000 --rollout-every 5000 --ckpt-every 500
 ```
 
+## Leak-free synchronized future-event control
+
+This rebuttal control tests synchronization without conflating it with the
+number of input embeddings. Build context windows and their embeddings as
+above, then label only the interval after each context window:
+
+```bash
+uv run python -m cs2_release.core.windows \
+  --root /data/CounterStrike-1K \
+  --manifest /data/CounterStrike-1K/manifest_dust2_confirmatory_spatial_v1.parquet \
+  --map-slug dust2 \
+  --window-seconds 1.0 \
+  --windows-per-round 4 \
+  --out runs/future_events/windows
+
+uv run python -m cs2_release.future_events.labels \
+  --root /data/CounterStrike-1K \
+  --shard-root /data/CounterStrike-1K \
+  --resolution 360p \
+  --windows runs/future_events/windows/eval_windows.parquet \
+  --horizon-seconds 1.0 \
+  --out runs/future_events/labels
+
+uv run python -m cs2_release.future_events.train \
+  --labels runs/future_events/labels/future_event_labels.parquet \
+  --embeddings runs/future_events/embeddings/dinov2_vitb14 \
+  --seeds 17 29 43 \
+  --bootstrap-samples 10000 \
+  --out runs/future_events/probes
+```
+
+The three heads have identical capacity and fixed-size aggregate features:
+
+- `single` receives one deterministically selected anchor POV;
+- `synchronized` receives all ten POVs from the target round and time;
+- `shuffled` keeps the same anchor and replaces the other nine inputs with
+  same-split, different-match, distinct-round distractors.
+
+Context is `[start_frame, end_frame)` and labels are read strictly from
+`[end_frame, future_end_frame)`. Target inclusion is selected from training
+support only. Test uncertainty uses a paired match-cluster bootstrap.
+
 ## Sharded embedding extraction (multi-GPU)
 
 For larger encoders, split extraction across GPUs and merge:

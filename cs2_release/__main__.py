@@ -29,6 +29,8 @@ ENTRY_POINTS = {
     "action_probe.off_pov":              "Off-POV miss-rate diagnostic.",
     "audio_probe.train":                 "Train the small audio-only action probe.",
     "global_state.train":                "Train the k-POV global state probe (paper Table 8).",
+    "future_events.labels":              "Build leak-free future-event labels after video context.",
+    "future_events.train":               "Run single/synchronized/shuffled future-event probes.",
     "corruption.make_packs":             "Build 10-POV corruption packs.",
     "corruption.train":                  "Train the corruption-detection head.",
     "corruption.eval":                   "Evaluate the corruption head on test packs.",
