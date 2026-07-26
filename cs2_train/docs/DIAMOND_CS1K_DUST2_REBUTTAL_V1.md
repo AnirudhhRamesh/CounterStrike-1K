@@ -114,29 +114,29 @@ python cs2_train/scripts/audit_diamond_20k_endpoint.py \
   --output /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k/post_test_integrity_audit_with_arr.json
 ```
 
-## Question and endpoint
+## Superseded original two-training-arm plan (not executed)
 
-The experiment asks whether the DIAMOND-CSGO world model uses aligned player
-actions, rather than merely predicting locally plausible video. Two models are
-trained from the same initialization for exactly 50,000 optimizer steps:
+The original plan would have asked whether the DIAMOND-CSGO world model uses
+aligned player actions, rather than merely predicting locally plausible video,
+by training two models from the same initialization for exactly 50,000
+optimizer steps:
 
 - `true`: each video window receives its aligned action sequence.
 - `shuffled`: each video window receives a complete action sequence from a
   different round in the minibatch. There are no fixed points. The control
   preserves sequence order and action marginals.
 
-Both arms use one RTX PRO 6000 Blackwell 96 GB GPU, batch 80, BF16, seed 28,
-the same data loader, architecture, optimizer, schedule, validation windows,
-and checkpoint cadence. The test endpoint is the final step 50,000 checkpoint;
-test results are not used for checkpoint selection.
+Both planned arms would have used one RTX PRO 6000 Blackwell 96 GB GPU, batch
+80, BF16, seed 28, the same data loader, architecture, optimizer, schedule,
+validation windows, and checkpoint cadence. This plan was superseded before
+test access by the single-checkpoint step-20,000 resource amendment above.
 
-Each arm is launched in a fresh process. The global CPU and CUDA RNGs are
-reset to seed 28 before dataset and model construction, while action
-derangements use a separate CPU `torch.Generator` seeded with 90001. A release
-test requires a shuffled-action draw to advance only that dedicated generator,
-not the global model/data RNG. Consequently, changing the arm changes the
-action intervention without changing the seeded initialization or data-order
-RNG stream.
+The unused launcher would have started each arm in a fresh process. The global
+CPU and CUDA RNGs reset to seed 28 before dataset and model construction,
+while action derangements use a separate CPU `torch.Generator` seeded with
+90001. That machinery and its regression test remain available for
+reproducibility of the superseded plan, but no shuffled-action-trained
+checkpoint enters the amended result.
 
 ## Dataset contract
 
