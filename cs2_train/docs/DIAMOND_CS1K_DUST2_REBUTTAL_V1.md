@@ -31,6 +31,51 @@ difference-in-differences result, the original 50,000-step endpoint, or a
 full-budget upstream DIAMOND reproduction. The step-20,000 training trajectory
 itself is unchanged from the original frozen config.
 
+### Completed resource-amended endpoint (2026-07-26 UTC)
+
+The atomic step-20,000 checkpoint has SHA-256
+`d921ca28468f594e3f0136b9ed89262fe449ac73a8540149ca2886ef29368080`.
+Both windows completed over all 69 held-out rounds / 690 POV rows and all
+three fixed evaluation seeds:
+
+| Window | Metric | True | Cross-round shuffled | Shuffled - true | Round-cluster 95% CI | Positive rounds |
+|---|---|---:|---:|---:|---:|---:|
+| midpoint | eight-step mean MSE | 0.080541 | 0.122850 | +0.042309 | [0.037105, 0.047518] | 68/69 |
+| midpoint | world-view RAFT EPE | 0.035250 | 0.047394 | +0.012144 | [0.011147, 0.013180] | 69/69 |
+| first-death | eight-step mean MSE | 0.089599 | 0.128401 | +0.038803 | [0.034877, 0.042928] | 67/69 |
+| first-death | world-view RAFT EPE | 0.036859 | 0.049624 | +0.012765 | [0.011672, 0.013871] | 69/69 |
+
+Correct actions therefore reduce world-view flow EPE by 25.6% at midpoint and
+25.7% around first death relative to the distribution-matched cross-round
+control. Pixel MSE agrees but is secondary because it can reward blurry or
+conservative predictions.
+
+The frozen 4.15M-parameter temporal action probe was trained on 200,000
+real-video train segments and selected at epoch 14 on 20,000 match-disjoint
+validation segments (validation macro average precision `0.633439`). Its
+checkpoint SHA-256 is
+`c8080ef0ec8fede4fc935d07d4eac9b3840d82d8cbc0b00669b73dc42f433b00`.
+Midpoint true-target alignment separation is `+0.040302`, CI
+`[0.017990, 0.084380]`. The first-death estimate is `+0.011330`, CI
+`[-0.071565, 0.029523]`, and is inconclusive; 146 post-alive segments are
+excluded. The first-death ARR result must not be described as a replication
+of the significant midpoint ARR result.
+
+The ARR-extended independent audit is public at commit
+`d138f57707cb15fc0ee5ecf0d5023cdb360bbd8d`. It rehashes the checkpoint,
+both rollout archives, all pixel/RAFT rows, the probe and train/validation
+feature archives, and both ARR outputs. The real audit passed with report
+SHA-256
+`874be977f8576111067c39b60328732ce477109d3c7bb87339f96449794e4724`.
+
+```bash
+python cs2_train/scripts/audit_diamond_20k_endpoint.py \
+  --endpoint-root /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k \
+  --checkpoint /runs/diamond-cs1k-dust2-360p-rebuttal-v2/true/step_0020000.pt \
+  --probe-checkpoint /runs/temporal-arr-cs1k-dust2-v1/probe/temporal_action_probe.pt \
+  --output /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k/post_test_integrity_audit_with_arr.json
+```
+
 ## Question and endpoint
 
 The experiment asks whether the DIAMOND-CSGO world model uses aligned player
