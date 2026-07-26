@@ -52,6 +52,57 @@ uv run python -m cs2_train.src.train \
 For the action-conditioning ablation, replace `--action-mode true` with
 `--action-mode shuffled` or `--action-mode zeros`.
 
+## Dust2 360p rebuttal reproduction
+
+The current matched-compute, Dust2-only action-sensitivity experiment is frozen
+in `configs/diamond_cs1k_dust2_360p_rebuttal_v1.json`. See
+`docs/DIAMOND_CS1K_DUST2_REBUTTAL_V1.md` for the exact data, model, compute,
+shuffle, paired-RNG evaluation, and private review-publishing contracts.
+
+Run the checked launcher from a clean checkout:
+
+```bash
+bash cs2_train/scripts/run_diamond_cs1k_dust2_rebuttal_v1.sh
+```
+
+The held-out evaluator can also write a hashed model-agnostic rollout archive
+with `--save-rollout-archive`. Score its paired camera/scene motion with:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_motion \
+  --archive-dir /path/to/evaluation/rollout_archive
+```
+
+This fixed-RAFT endpoint complements rather than replaces the frozen pixel-MSE
+endpoint. The protocol documents its world-view crop, weight hash, bootstrap
+unit, limitations, and the follow-on MIRA-style action/state probes.
+
+The shared temporal action probe for Action Recoverability Ratio is frozen in
+`configs/temporal_arr_cs1k_dust2_v1.json`. It uses only real train/validation
+windows and a public commit- and weight-pinned DINOv2-B/14 backbone:
+
+```bash
+DATA_DIR=/data/cs1k-360p \
+ARR_ROOT=/runs/temporal-arr-cs1k-dust2-v1 \
+bash cs2_train/scripts/run_temporal_action_probe_dust2_v1.sh
+```
+
+After a confirmatory evaluator writes `rollout_archive/`, score it without
+resampling the world model:
+
+```bash
+python -m cs2_train.src.evaluate_rollout_arr \
+  --archive-dir /path/to/evaluation/rollout_archive \
+  --probe-checkpoint /runs/temporal-arr-cs1k-dust2-v1/probe/temporal_action_probe.pt \
+  --bootstrap-replicates 10000
+```
+
+ARR uses exact-tie-aware average precision and a paired bootstrap clustered by
+round. The public DINOv2 substitution, label definition, real-video ceiling,
+post-alive masking, and provenance requirements are specified in the protocol.
+
+This is separate from the historical Table 11 reproduction below.
+
 ## Paper Table 11 reproduction
 
 The completed true-action job in the paper ran for 30,000 steps on four L40S

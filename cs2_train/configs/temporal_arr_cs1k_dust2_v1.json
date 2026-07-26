@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "name": "temporal-arr-cs1k-dust2-v1",
+  "status": "frozen-before-probe-training",
+  "purpose": "MIRA-inspired cross-model action recoverability evaluator trained only on real CounterStrike-1K train data and selected only on validation.",
+  "dataset": {
+    "manifest_name": "manifest_dust2_confirmatory_spatial_v1.parquet",
+    "manifest_sha256": "33abbb623072932431871a612620110c473d4b664c52010e5763c273c6daf10e",
+    "provenance_name": "manifest_dust2_confirmatory_spatial_v1.provenance.json",
+    "provenance_sha256": "3f6419f9414576c88773874c8009c0814e827186c8782831cc373a27be70c2ef",
+    "map_slug": "dust2",
+    "source_resolution": "360p",
+    "source_fps": 32,
+    "target_fps": 8,
+    "train_windows": 100000,
+    "train_sampling_seed": 20250725,
+    "validation_windows": 10000,
+    "validation_sampling_seed": 20250726,
+    "frames_per_window": 9,
+    "decode_resize": [
+      126,
+      224
+    ],
+    "loader_batch_size": 16,
+    "loader_workers": 8,
+    "loader_prefetch_factor": 2,
+    "frame_encoder_batch_size": 128,
+    "alive_only": true,
+    "split_unit": "match"
+  },
+  "backbone": {
+    "implementation": "facebookresearch/dinov2 torch.hub",
+    "repository": "facebookresearch/dinov2:7764ea0f912e53c92e82eb78a2a1631e92725fc8",
+    "model": "dinov2_vitb14",
+    "weights_sha256": "0b8b82f85de91b424aded121c7e1dcc2b7bc6d0adeea651bf73a13307fad8c73",
+    "frozen": true,
+    "input_size": 224,
+    "feature_dim": 768,
+    "deviation_from_mira": "MIRA uses manually gated DINOv3-B weights. This public evaluator uses a commit- and weight-pinned DINOv2-B/14 backbone."
+  },
+  "labels": {
+    "segment_frames": 5,
+    "segment_transitions": 4,
+    "segment_seconds": 0.5,
+    "buttons": [
+      "FORWARD",
+      "BACK",
+      "LEFT",
+      "RIGHT",
+      "JUMP",
+      "DUCK",
+      "WALK",
+      "FIRE",
+      "RIGHTCLICK",
+      "RELOAD"
+    ],
+    "mouse": [
+      "PITCH_NEG",
+      "PITCH_POS",
+      "YAW_NEG",
+      "YAW_POS"
+    ],
+    "mouse_threshold_degrees": 1.0,
+    "unmapped_excluded": [
+      "INSPECT",
+      "USE"
+    ]
+  },
+  "probe": {
+    "architecture": "two-layer temporal transformer over five frozen per-frame class-token features",
+    "hidden_dim": 384,
+    "num_layers": 2,
+    "num_heads": 8,
+    "dropout": 0.1,
+    "batch_size": 1024,
+    "epochs": 30,
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "max_positive_weight": 100.0,
+    "seed": 20250725,
+    "selection": "maximum validation macro average precision",
+    "test_access": "none"
+  },
+  "endpoint": {
+    "definition": "Per-class generated-video average precision divided by model-native real-video average precision.",
+    "average_precision": "threshold-based and exact-tie-aware",
+    "segments_per_rollout": 2,
+    "rollout_steps": 8,
+    "action_modes_required": [
+      "true",
+      "shuffled"
+    ],
+    "bootstrap_unit": "round_id",
+    "bootstrap_replicates": 10000,
+    "bootstrap_seed": 20250728,
+    "post_alive": "exclude a segment unless all four target steps are valid"
+  }
+}

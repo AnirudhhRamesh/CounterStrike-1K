@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "baseline_name": "DIAMOND-CSGO-on-CounterStrike-1K-360p-Dust2-rebuttal-v1",
+  "status": "frozen-before-confirmatory-training",
+  "purpose": "Matched-compute true-versus-shuffled action-conditioning baseline for the CounterStrike-1K NeurIPS rebuttal.",
+  "upstream": {
+    "repo": "https://github.com/eloialonso/diamond",
+    "branch": "csgo",
+    "commit": "851cefb497733d27f1b85c804104638765860fca",
+    "model_contract": "Full 330.5M-parameter DIAMOND-CSGO low-resolution denoiser; only CounterStrike-1K data/action adapters and experiment instrumentation differ."
+  },
+  "dataset": {
+    "release": "CounterStrike-1K",
+    "source_resolution": "360p",
+    "map_slug": "dust2",
+    "manifest_name": "manifest_dust2_confirmatory_spatial_v1.parquet",
+    "manifest_sha256": "33abbb623072932431871a612620110c473d4b664c52010e5763c273c6daf10e",
+    "provenance_sha256": "3f6419f9414576c88773874c8009c0814e827186c8782831cc373a27be70c2ef",
+    "split_statistics": {
+      "train": {
+        "matches": 36,
+        "rounds": 766,
+        "pov_rows": 7660,
+        "aligned_pov_hours": 87.08993055555555
+      },
+      "val": {
+        "matches": 3,
+        "rounds": 54,
+        "pov_rows": 540,
+        "aligned_pov_hours": 4.959461805555556
+      },
+      "test": {
+        "matches": 3,
+        "rounds": 69,
+        "pov_rows": 690,
+        "aligned_pov_hours": 8.295833333333334
+      }
+    },
+    "source_fps": 32,
+    "target_fps": 8,
+    "action_aggregation": {
+      "buttons": "bitwise OR over each four-source-frame interval",
+      "mouse": "sum delta_pitch and delta_yaw over each four-source-frame interval"
+    }
+  },
+  "arms": {
+    "true": "Aligned action sequence for each video window.",
+    "shuffled": "Whole action sequence from a different round in the same minibatch; no fixed points, temporal order and marginals preserved."
+  },
+  "compute_contract": {
+    "gpu": "1 x NVIDIA RTX PRO 6000 Blackwell Server Edition 96GB",
+    "equal_steps": true,
+    "equal_batch": true,
+    "equal_initialization_seed": true,
+    "optimizer_steps_per_arm": 50000,
+    "sequences_per_step": 80,
+    "sampled_sequences_per_arm": 4000000,
+    "endpoint_rule": "The endpoint is fixed at step 50000 before confirmatory test evaluation. Test metrics are not used for checkpoint selection."
+  },
+  "train_args": {
+    "preset": "full",
+    "resize": [
+      36,
+      64
+    ],
+    "cond_frames": 4,
+    "num_autoregressive_steps": 4,
+    "target_fps": 8,
+    "stride": 4,
+    "train_window_mode": "sliding",
+    "val_window_mode": "midpoint",
+    "map_slug": "dust2",
+    "manifest_name": "manifest_dust2_confirmatory_spatial_v1.parquet",
+    "resolution": "360p",
+    "action_mode": "true",
+    "action_shuffle_seed": 90001,
+    "batch_size": 80,
+    "grad_acc": 1,
+    "lr": 0.0001,
+    "weight_decay": 0.01,
+    "lr_warmup": 100,
+    "max_grad_norm": 10.0,
+    "max_steps": 50000,
+    "mixed_precision": "bf16",
+    "scale_loss_by_grad_acc": true,
+    "deterministic": true,
+    "num_workers": 8,
+    "prefetch_factor": 4,
+    "persistent_workers": true,
+    "log_every": 20,
+    "val_every": 2500,
+    "rollout_every": 2500,
+    "rollout_steps": 8,
+    "val_batch_size": 8,
+    "val_rows": 8,
+    "val_denoise_steps": 1,
+    "val_s_cond": 0.005,
+    "ema_decay": 0.999,
+    "use_ema_for_val": true,
+    "ckpt_every": 10000,
+    "save_latest": true,
+    "wandb_project": "cs2-wm",
+    "wandb_mode": "disabled",
+    "seed": 28,
+    "device": "cuda"
+  },
+  "confirmatory_evaluation": {
+    "split": "test",
+    "windows": [
+      "midpoint",
+      "first-death"
+    ],
+    "num_test_pov_rows": 690,
+    "num_test_rounds": 69,
+    "eval_seeds": [
+      37,
+      41,
+      43
+    ],
+    "rollout_steps": 8,
+    "action_modes": [
+      "true",
+      "shuffled",
+      "zeros"
+    ],
+    "pairing": "For every checkpoint/window/seed, all action modes use identical videos and reset to identical diffusion random draws.",
+    "shuffle": "Each held-out action donor is the same POV slot from a different round, using a seeded cyclic round derangement.",
+    "uncertainty": "95% percentile bootstrap confidence intervals clustered by round_id with 10000 replicates."
+  }
+}
