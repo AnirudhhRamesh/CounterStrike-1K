@@ -58,20 +58,15 @@ def build_retrieval_pairs(
             ]
         else:
             raise ValueError(f"unknown negative_policy={negative_policy!r}")
-        if neg_pool.empty:
-            neg_pool = df[
-                (df["map_slug"] == query["map_slug"])
-                & (df["round_id"] != query["round_id"])
-                & (df["pov_idx"] != int(query["pov_idx"]))
-            ]
-        if neg_pool.empty:
-            continue
         n_neg = max(1, candidates_per_query - 1)
-        replace = len(neg_pool) < n_neg
-        neg_indices = rng.choice(neg_pool.index.to_numpy(), size=n_neg, replace=replace)
+        neg_pool = neg_pool.drop_duplicates(["eval_window_id", "pov_idx"], keep=False)
+        if len(neg_pool) < n_neg:
+            continue
+        neg_indices = rng.choice(neg_pool.index.to_numpy(), size=n_neg, replace=False)
         candidate_set_id = f"{query['eval_window_id']}__q{int(query['pov_idx']):02d}"
         candidates = [(positive, 1)]
         candidates.extend((df.loc[idx], 0) for idx in neg_indices)
+        rng.shuffle(candidates)
         for rank_idx, (candidate, label) in enumerate(candidates):
             pair_rows.append({
                 "candidate_set_id": candidate_set_id,

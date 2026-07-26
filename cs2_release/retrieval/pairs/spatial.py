@@ -18,7 +18,6 @@ from cs2_release.core.io import (
     write_json,
 )
 
-
 POSITION_COLUMNS = ["pos_x", "pos_y", "pos_z"]
 
 _STATE_BIN_DTYPE = np.dtype([
@@ -223,10 +222,7 @@ def build_spatial_retrieval_pairs(
         if positives.empty:
             continue
         positives["query_candidate_distance"] = _distances_to_query(query, positives, include_z=include_z)
-        same_time_distances = positives.copy()
         positives = positives[positives["query_candidate_distance"] <= positive_radius]
-        if positives.empty and negative_policy == "same_time_far_location":
-            positives = same_time_distances.sort_values(["query_candidate_distance", "pov_idx"]).head(1)
         if positives.empty:
             continue
         positives = positives.sort_values(["query_candidate_distance", "pov_idx"])
@@ -246,21 +242,12 @@ def build_spatial_retrieval_pairs(
                     (~neg_pool["pov_idx"].astype(int).isin(positive_povs))
                     & (neg_pool["query_candidate_distance"] > min_radius)
                 ]
-                if neg_pool.empty:
-                    neg_pool = same_time_distances[
-                        ~same_time_distances["pov_idx"].astype(int).isin(positive_povs)
-                    ].sort_values(["query_candidate_distance", "pov_idx"], ascending=[False, True])
         elif negative_policy == "same_map_phase_different_round":
             neg_pool = df[
                 (df["map_slug"] == query["map_slug"])
                 & (df["phase_bucket"] == query["phase_bucket"])
                 & (df["round_id"] != query["round_id"])
             ].copy()
-            if neg_pool.empty:
-                neg_pool = df[
-                    (df["map_slug"] == query["map_slug"])
-                    & (df["round_id"] != query["round_id"])
-                ].copy()
         elif negative_policy == "same_location_wrong_time":
             location_radius = (
                 float(positive_radius)
@@ -275,21 +262,15 @@ def build_spatial_retrieval_pairs(
             if not neg_pool.empty:
                 neg_pool["query_candidate_distance"] = _distances_to_query(query, neg_pool, include_z=include_z)
                 neg_pool = neg_pool[neg_pool["query_candidate_distance"] <= location_radius]
-            if neg_pool.empty:
-                neg_pool = df[
-                    (df["map_slug"] == query["map_slug"])
-                    & (df["round_id"] != query["round_id"])
-                ].copy()
-                if not neg_pool.empty:
-                    neg_pool["query_candidate_distance"] = _distances_to_query(query, neg_pool, include_z=include_z)
-                    neg_pool = neg_pool[neg_pool["query_candidate_distance"] <= location_radius]
         else:
             raise ValueError(f"unknown negative_policy={negative_policy!r}")
         if neg_pool.empty:
             continue
         n_neg = max(1, candidates_per_query - len(positives))
-        replace = len(neg_pool) < n_neg
-        neg_indices = rng.choice(neg_pool.index.to_numpy(), size=n_neg, replace=replace)
+        neg_pool = neg_pool.drop_duplicates(["eval_window_id", "pov_idx"], keep=False)
+        if len(neg_pool) < n_neg:
+            continue
+        neg_indices = rng.choice(neg_pool.index.to_numpy(), size=n_neg, replace=False)
         candidate_set_id = f"{query['eval_window_id']}__q{int(query['pov_idx']):02d}"
         candidates = [(row, 1, float(row["query_candidate_distance"])) for _, row in positives.iterrows()]
         for idx in neg_indices:

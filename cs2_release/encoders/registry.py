@@ -20,6 +20,26 @@ class BaseEncoder:
     def encode(self, frames: np.ndarray) -> np.ndarray:
         raise NotImplementedError
 
+    def encode_many(
+        self,
+        frames: np.ndarray,
+        frame_groups: list[list[int]],
+        *,
+        batch_size: int,
+    ) -> np.ndarray:
+        """Encode several windows decoded from one clip.
+
+        The dependency-free default preserves each encoder's exact window
+        semantics. Neural image encoders override this to share frame-level
+        forward passes across overlapping windows.
+        """
+
+        del batch_size
+        return np.stack(
+            [self.encode(frames[np.asarray(group, dtype=np.int64)]) for group in frame_groups],
+            axis=0,
+        ).astype(np.float32)
+
 
 class RGBHistEncoder(BaseEncoder):
     """Dependency-free visual baseline for smoke tests and offline reviewers."""
@@ -78,15 +98,43 @@ class TorchvisionImageEncoder(BaseEncoder):
         self.model = model.to(self.device).eval()
         self.spec = EncoderSpec(name=f"torchvision_{model_name}", dim=dim, resize=resize)
 
-    def encode(self, frames: np.ndarray) -> np.ndarray:
+    def _encode_frame_features(self, frames: np.ndarray, *, batch_size: int) -> np.ndarray:
         torch = self.torch
+        chunks = []
         with torch.no_grad():
-            x = torch.from_numpy(frames).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-            x = (x - self.preprocess_mean) / self.preprocess_std
-            feats = self.model(x)
-            feat = feats.mean(dim=0)
-            feat = torch.nn.functional.normalize(feat, dim=0)
-            return feat.detach().cpu().numpy().astype(np.float32)
+            for start in range(0, len(frames), batch_size):
+                x = (
+                    torch.from_numpy(frames[start:start + batch_size])
+                    .to(self.device)
+                    .float()
+                    .permute(0, 3, 1, 2)
+                    / 255.0
+                )
+                x = (x - self.preprocess_mean) / self.preprocess_std
+                chunks.append(self.model(x).detach().cpu().numpy().astype(np.float32))
+        return np.concatenate(chunks, axis=0)
+
+    @staticmethod
+    def _pool(features: np.ndarray) -> np.ndarray:
+        pooled = features.mean(axis=0).astype(np.float32)
+        norm = float(np.linalg.norm(pooled))
+        return pooled / norm if norm > 0 else pooled
+
+    def encode(self, frames: np.ndarray) -> np.ndarray:
+        return self._pool(self._encode_frame_features(frames, batch_size=max(1, len(frames))))
+
+    def encode_many(
+        self,
+        frames: np.ndarray,
+        frame_groups: list[list[int]],
+        *,
+        batch_size: int,
+    ) -> np.ndarray:
+        features = self._encode_frame_features(frames, batch_size=batch_size)
+        return np.stack(
+            [self._pool(features[np.asarray(group, dtype=np.int64)]) for group in frame_groups],
+            axis=0,
+        )
 
 
 class DINOv2Encoder(BaseEncoder):
@@ -118,22 +166,51 @@ class DINOv2Encoder(BaseEncoder):
         self.std = torch.tensor([0.229, 0.224, 0.225], device=self.device).view(1, 3, 1, 1)
         self.spec = EncoderSpec(name=variant, dim=dims.get(variant, 0), resize=resize)
 
-    def encode(self, frames: np.ndarray) -> np.ndarray:
+    def _encode_frame_features(self, frames: np.ndarray, *, batch_size: int) -> np.ndarray:
         torch = self.torch
+        chunks = []
         with torch.no_grad():
-            x = torch.from_numpy(frames).to(self.device).float().permute(0, 3, 1, 2) / 255.0
-            x = (x - self.mean) / self.std
-            feats = self.model(x)
-            if isinstance(feats, dict):
-                if "x_norm_clstoken" in feats:
-                    feats = feats["x_norm_clstoken"]
-                elif "x_prenorm" in feats:
-                    feats = feats["x_prenorm"]
-                else:
-                    raise ValueError(f"DINOv2 returned unsupported keys: {sorted(feats)}")
-            feat = feats.mean(dim=0)
-            feat = torch.nn.functional.normalize(feat, dim=0)
-            return feat.detach().cpu().numpy().astype(np.float32)
+            for start in range(0, len(frames), batch_size):
+                x = (
+                    torch.from_numpy(frames[start:start + batch_size])
+                    .to(self.device)
+                    .float()
+                    .permute(0, 3, 1, 2)
+                    / 255.0
+                )
+                x = (x - self.mean) / self.std
+                feats = self.model(x)
+                if isinstance(feats, dict):
+                    if "x_norm_clstoken" in feats:
+                        feats = feats["x_norm_clstoken"]
+                    elif "x_prenorm" in feats:
+                        feats = feats["x_prenorm"]
+                    else:
+                        raise ValueError(f"DINOv2 returned unsupported keys: {sorted(feats)}")
+                chunks.append(feats.detach().cpu().numpy().astype(np.float32))
+        return np.concatenate(chunks, axis=0)
+
+    @staticmethod
+    def _pool(features: np.ndarray) -> np.ndarray:
+        pooled = features.mean(axis=0).astype(np.float32)
+        norm = float(np.linalg.norm(pooled))
+        return pooled / norm if norm > 0 else pooled
+
+    def encode(self, frames: np.ndarray) -> np.ndarray:
+        return self._pool(self._encode_frame_features(frames, batch_size=max(1, len(frames))))
+
+    def encode_many(
+        self,
+        frames: np.ndarray,
+        frame_groups: list[list[int]],
+        *,
+        batch_size: int,
+    ) -> np.ndarray:
+        features = self._encode_frame_features(frames, batch_size=batch_size)
+        return np.stack(
+            [self._pool(features[np.asarray(group, dtype=np.int64)]) for group in frame_groups],
+            axis=0,
+        )
 
 
 def canonical_encoder_name(name: str) -> str:

@@ -9,10 +9,27 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
+from cs2_release.core.io import (
+    DatasetRoots,
+    dataframe_sha256,
+    git_commit,
+    read_parquet,
+    read_video_bytes,
+    write_json,
+)
+from cs2_release.core.tracking import (
+    add_wandb_args,
+    finish_wandb,
+    log_artifact,
+    log_images,
+    log_metrics,
+)
+from cs2_release.core.video import (
+    decode_sampled_frames,
+    make_frame_grid,
+    sample_frame_indices,
+)
 from cs2_release.encoders.registry import build_encoder
-from cs2_release.core.io import DatasetRoots, dataframe_sha256, git_commit, read_parquet, read_video_bytes, write_json
-from cs2_release.core.tracking import add_wandb_args, finish_wandb, log_artifact, log_images, log_metrics
-from cs2_release.core.video import decode_sampled_frames, make_frame_grid, sample_frame_indices
 
 
 def extract_embeddings(
@@ -22,6 +39,7 @@ def extract_embeddings(
     encoder_name: str,
     device: str,
     frames_per_window: int,
+    encoder_batch_size: int,
     max_windows: int | None,
     row_start: int | None,
     row_end: int | None,
@@ -52,17 +70,23 @@ def extract_embeddings(
             break
 
     encoder = build_encoder(encoder_name, device=device)
-    embeddings: list[np.ndarray] = []
+    embeddings = np.full((len(windows), encoder.spec.dim), np.nan, dtype=np.float32)
     failed: list[dict] = []
     started = time.time()
-    for row_idx, (_, row) in enumerate(tqdm(windows.iterrows(), total=len(windows), desc="embed windows"), start=1):
-        sample_key = str(row["sample_key"])
+    processed_rows = 0
+    sample_groups = list(windows.groupby("sample_key", sort=False))
+    for sample_key_value, group in tqdm(sample_groups, total=len(sample_groups), desc="embed clips"):
+        sample_key = str(sample_key_value)
         try:
-            frame_indices = sample_frame_indices(
-                int(row["start_frame"]),
-                int(row["end_frame"]),
-                frames_per_window,
-            )
+            requested = [
+                sample_frame_indices(
+                    int(row["start_frame"]),
+                    int(row["end_frame"]),
+                    frames_per_window,
+                )
+                for _, row in group.iterrows()
+            ]
+            union_indices = sorted({frame for indices in requested for frame in indices})
             video_bytes = read_video_bytes(
                 sample_key,
                 roots=roots,
@@ -71,31 +95,44 @@ def extract_embeddings(
             )
             frames = decode_sampled_frames(
                 video_bytes,
-                frame_indices,
+                union_indices,
                 resize=encoder.spec.resize,
             )
-            window_id = str(row["eval_window_id"])
-            if window_id in preview_frames:
-                preview_frames[window_id][int(row["pov_idx"])] = frames[len(frames) // 2]
-            embeddings.append(encoder.encode(frames))
+            frame_position = {frame_idx: position for position, frame_idx in enumerate(union_indices)}
+            frame_groups = [
+                [frame_position[frame_idx] for frame_idx in indices]
+                for indices in requested
+            ]
+            group_embeddings = encoder.encode_many(
+                frames,
+                frame_groups,
+                batch_size=encoder_batch_size,
+            )
+            embeddings[group.index.to_numpy(dtype=np.int64)] = group_embeddings
+            for (_, row), indices in zip(group.iterrows(), requested, strict=True):
+                window_id = str(row["eval_window_id"])
+                if window_id in preview_frames:
+                    middle_frame = indices[len(indices) // 2]
+                    preview_frames[window_id][int(row["pov_idx"])] = frames[
+                        frame_position[middle_frame]
+                    ]
         except Exception as exc:  # noqa: BLE001 - record and keep batch reproducible.
-            failed.append({
-                "sample_key": sample_key,
-                "eval_window_id": str(row["eval_window_id"]),
-                "error": repr(exc),
-            })
-            embeddings.append(np.full((encoder.spec.dim,), np.nan, dtype=np.float32))
-        if wandb_run is not None and (row_idx == len(windows) or row_idx % 50 == 0):
+            for _, row in group.iterrows():
+                failed.append({
+                    "sample_key": sample_key,
+                    "eval_window_id": str(row["eval_window_id"]),
+                    "error": repr(exc),
+                })
+        processed_rows += len(group)
+        if wandb_run is not None and (
+            processed_rows == len(windows) or processed_rows // 50 != (processed_rows - len(group)) // 50
+        ):
             elapsed = max(time.time() - started, 1e-9)
             wandb_run.log({
-                "extract/processed_rows": row_idx,
+                "extract/processed_rows": processed_rows,
                 "extract/failed_rows": len(failed),
-                "extract/rows_per_sec": row_idx / elapsed,
+                "extract/rows_per_sec": processed_rows / elapsed,
             })
-    if embeddings:
-        emb = np.stack(embeddings, axis=0).astype(np.float32)
-    else:
-        emb = np.empty((0, encoder.spec.dim), dtype=np.float32)
     previews = []
     for window_id, by_pov in preview_frames.items():
         if not by_pov:
@@ -107,7 +144,7 @@ def extract_embeddings(
             columns=5,
         )
         previews.append((grid, f"{window_id} ({len(povs)} POVs)"))
-    return windows, emb, {"encoder": encoder, "failed": failed, "previews": previews}
+    return windows, embeddings, {"encoder": encoder, "failed": failed, "previews": previews}
 
 
 def main() -> int:
@@ -120,6 +157,12 @@ def main() -> int:
                         help="rgb_hist, torchvision_resnet18, torchvision_resnet50, dinov2_vits14, ...")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--frames-per-window", type=int, default=8)
+    parser.add_argument(
+        "--encoder-batch-size",
+        type=int,
+        default=128,
+        help="Maximum decoded frames per neural encoder forward pass.",
+    )
     parser.add_argument("--max-windows", type=int, default=None)
     parser.add_argument("--row-start", type=int, default=None)
     parser.add_argument("--row-end", type=int, default=None)
@@ -141,6 +184,7 @@ def main() -> int:
         encoder_name=args.encoder,
         device=args.device,
         frames_per_window=args.frames_per_window,
+        encoder_batch_size=args.encoder_batch_size,
         max_windows=args.max_windows,
         row_start=args.row_start,
         row_end=args.row_end,
@@ -171,6 +215,7 @@ def main() -> int:
         "failed": failed,
         "failed_count": int(len(failed)),
         "frames_per_window": int(args.frames_per_window),
+        "encoder_batch_size": int(args.encoder_batch_size),
         "row_start": args.row_start,
         "row_end": args.row_end,
         "resolution": args.resolution,

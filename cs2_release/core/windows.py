@@ -71,6 +71,7 @@ def build_windows(
     alive_only: bool,
     max_rounds_per_split: int | None,
     seed: int,
+    window_stride_seconds: float | None = None,
 ) -> pd.DataFrame:
     manifest, round_index = load_release_tables(root)
     manifest = filter_manifest_for_subset(manifest, root=root, subset=subset)
@@ -107,7 +108,15 @@ def build_windows(
         if max_start < interval_start:
             continue
 
-        if windows_per_round <= 1:
+        if window_stride_seconds is not None:
+            if window_stride_seconds <= 0:
+                raise ValueError("window_stride_seconds must be positive")
+            stride_frames = max(1, int(round(window_stride_seconds * fps)))
+            stride_ticks = stride_frames * frame_stride
+            starts = list(range(interval_start, max_start + 1, stride_ticks))
+            if starts and starts[-1] != max_start:
+                starts.append(max_start)
+        elif windows_per_round <= 1:
             starts = [interval_start + (max_start - interval_start) // 2]
         else:
             starts = [
@@ -171,6 +180,15 @@ def main() -> int:
     parser.add_argument("--map-slug", default=None)
     parser.add_argument("--window-seconds", type=float, default=1.0)
     parser.add_argument("--windows-per-round", type=int, default=1)
+    parser.add_argument(
+        "--window-stride-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Build dense windows at this stride instead of selecting a fixed number per round. "
+            "The final valid start is always included."
+        ),
+    )
     parser.add_argument("--include-dead-tail", action="store_true",
                         help="Use clip intersection instead of all-players-alive intersection.")
     parser.add_argument("--max-rounds-per-split", type=int, default=None)
@@ -191,6 +209,7 @@ def main() -> int:
         alive_only=not args.include_dead_tail,
         max_rounds_per_split=args.max_rounds_per_split,
         seed=args.seed,
+        window_stride_seconds=args.window_stride_seconds,
     )
     if windows.empty:
         raise RuntimeError("no valid synchronized windows were produced")
@@ -203,6 +222,7 @@ def main() -> int:
         "maps": sorted(windows["map_slug"].unique().tolist()),
         "window_seconds": args.window_seconds,
         "windows_per_round": args.windows_per_round,
+        "window_stride_seconds": args.window_stride_seconds,
         "alive_only": not args.include_dead_tail,
         "subset": args.subset,
         "split": args.split,
