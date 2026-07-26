@@ -131,8 +131,8 @@ def _attach_midpoint_positions_from_state_bin(
 ) -> list[dict]:
     sample_index = _sample_index_for(roots)
     rows: list[dict] = []
-    for _, row in windows.iterrows():
-        sample_key = str(row["sample_key"])
+    for sample_key_value, sample_windows in windows.groupby("sample_key", sort=False):
+        sample_key = str(sample_key_value)
         try:
             payload = read_member_bytes(
                 sample_key,
@@ -146,27 +146,28 @@ def _attach_midpoint_positions_from_state_bin(
             continue
         n_records = len(payload) // _STATE_BIN_DTYPE.itemsize
         state = np.frombuffer(payload, dtype=_STATE_BIN_DTYPE, count=n_records)
-        start_frame = int(row["start_frame"])
-        end_frame = int(row["end_frame"])
-        if start_frame < 0 or end_frame <= start_frame or start_frame >= n_records:
-            continue
-        mid_frame = min(max((start_frame + end_frame) // 2, 0), n_records - 1)
-        record = state[mid_frame]
-        mid_tick = int((int(row["start_tick"]) + int(row["end_tick"])) // 2)
-        state_tick = int(record["tick"])
-        tick_gap = abs(state_tick - mid_tick)
-        if tick_gap > max_tick_gap:
-            continue
-        positions = [float(record[col]) for col in POSITION_COLUMNS]
-        if not all(np.isfinite(positions)):
-            continue
-        out = row.to_dict()
-        out["mid_tick"] = mid_tick
-        out["state_tick"] = state_tick
-        out["state_tick_gap"] = int(tick_gap)
-        for col, value in zip(POSITION_COLUMNS, positions, strict=True):
-            out[col] = value
-        rows.append(out)
+        for _, row in sample_windows.iterrows():
+            start_frame = int(row["start_frame"])
+            end_frame = int(row["end_frame"])
+            if start_frame < 0 or end_frame <= start_frame or start_frame >= n_records:
+                continue
+            mid_frame = min(max((start_frame + end_frame) // 2, 0), n_records - 1)
+            record = state[mid_frame]
+            mid_tick = int((int(row["start_tick"]) + int(row["end_tick"])) // 2)
+            state_tick = int(record["tick"])
+            tick_gap = abs(state_tick - mid_tick)
+            if tick_gap > max_tick_gap:
+                continue
+            positions = [float(record[col]) for col in POSITION_COLUMNS]
+            if not all(np.isfinite(positions)):
+                continue
+            out = row.to_dict()
+            out["mid_tick"] = mid_tick
+            out["state_tick"] = state_tick
+            out["state_tick_gap"] = int(tick_gap)
+            for col, value in zip(POSITION_COLUMNS, positions, strict=True):
+                out[col] = value
+            rows.append(out)
     return rows
 
 
@@ -201,17 +202,20 @@ def build_spatial_retrieval_pairs(
     include_z: bool,
     max_tick_gap: int,
     seed: int,
+    query_seed: int | None = None,
 ) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     df = windows[windows["split"] == split].copy().reset_index(drop=True)
-    df = attach_midpoint_positions(df, root=root, roots=roots, max_tick_gap=max_tick_gap)
+    if not set(POSITION_COLUMNS).issubset(df.columns):
+        df = attach_midpoint_positions(df, root=root, roots=roots, max_tick_gap=max_tick_gap)
     if df.empty:
         return df
     df = df.reset_index(drop=True)
     df["window_row_id"] = np.arange(len(df), dtype=np.int64)
     groups = {str(k): g.copy() for k, g in df.groupby("eval_window_id", sort=False)}
     query_rows = df.sort_values(["map_slug", "phase_bucket", "round_id", "pov_idx"]).copy()
-    query_rows = _sample_rows(query_rows, max_queries, rng)
+    query_rng = np.random.default_rng(seed if query_seed is None else query_seed)
+    query_rows = _sample_rows(query_rows, max_queries, query_rng)
 
     pair_rows: list[dict] = []
     for _, query in query_rows.iterrows():
@@ -339,6 +343,12 @@ def main() -> int:
     parser.add_argument("--include-z", action="store_true")
     parser.add_argument("--max-state-tick-gap", type=int, default=16)
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument(
+        "--query-seed",
+        type=int,
+        default=None,
+        help="Optional query-subsampling seed held fixed across pair-sampling repeats.",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -364,6 +374,7 @@ def main() -> int:
         include_z=args.include_z,
         max_tick_gap=args.max_state_tick_gap,
         seed=args.seed,
+        query_seed=args.query_seed,
     )
     if pairs.empty:
         raise RuntimeError("no spatial retrieval pairs were produced")

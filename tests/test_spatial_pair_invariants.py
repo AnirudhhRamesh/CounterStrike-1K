@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from cs2_release.retrieval.pairs import spatial
+from cs2_release.retrieval.spatial_protocol_sweep import build_spatial_sweep
 
 
 def _positioned_windows(*, colocated: bool, windows_per_round: int = 2) -> pd.DataFrame:
@@ -87,3 +88,26 @@ def test_same_time_far_skips_impossible_32_way_sets(monkeypatch) -> None:
         seed=123,
     )
     assert pairs.empty
+
+
+def test_radius_sweep_uses_3d_strict_common_cohort() -> None:
+    tables, metadata = build_spatial_sweep(
+        _positioned_windows(colocated=True, windows_per_round=3),
+        root=Path("."),
+        split="test",
+        radii=[100.0, 200.0],
+        seeds=[17, 29],
+        candidates_per_query=4,
+        max_queries=20,
+        query_seed=123,
+    )
+    assert metadata["status"] == "pass"
+    assert metadata["include_z"] is True
+    assert metadata["aligned_queries"] > 0
+    assert len(tables) == 4
+    for table in tables.values():
+        assert table["candidate_set_id"].nunique() == metadata["aligned_queries"]
+        assert table.groupby("candidate_set_id").size().eq(4).all()
+        assert not table.groupby("candidate_set_id")["candidate_window_row_id"].apply(
+            lambda values: values.duplicated().any()
+        ).any()
