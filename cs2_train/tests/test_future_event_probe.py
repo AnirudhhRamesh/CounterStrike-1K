@@ -144,6 +144,49 @@ def test_probe_arms_hold_feature_count_and_anchor_contract() -> None:
     ].tolist()
 
 
+def test_checkpoint_representation_mode_keeps_identical_synchronized_windows() -> None:
+    labels = pd.DataFrame(
+        [
+            {
+                "eval_window_id": "round_a__mira_midpoint",
+                "round_id": "round_a",
+                "match_id": "match_a",
+                "split": "test",
+                "map_slug": "dust2",
+                "target_FIRE": 1,
+            }
+        ]
+    )
+    index = pd.DataFrame(
+        [
+            {
+                "eval_window_id": "round_a__mira_midpoint",
+                "sample_key": f"round_a__p{pov:02d}",
+                "pov_idx": pov,
+            }
+            for pov in range(10)
+        ]
+    )
+    embeddings = np.arange(30, dtype=np.float32).reshape(10, 3)
+
+    _, _, meta = build_arm_examples(
+        labels,
+        index,
+        embeddings,
+        ["target_FIRE"],
+        split="test",
+        arm="shuffled",
+        seed=17,
+        checkpoint_representations=True,
+    )
+
+    assert meta["feature_rows"].tolist() == [10]
+    assert meta["source_rounds"].tolist() == [1]
+    assert meta["source_windows"].iloc[0].split(",") == [
+        "round_a__mira_midpoint"
+    ] * 10
+
+
 def test_window_manifest_override_controls_match_atomic_split(tmp_path) -> None:
     manifest = pd.DataFrame(
         [

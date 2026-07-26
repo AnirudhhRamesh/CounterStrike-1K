@@ -1,9 +1,18 @@
 """Compare single, synchronized-10, and shuffled-10 future-event probes.
 
-The synchronized and shuffled arms contain exactly ten frozen video embeddings.
-For every target window, the shuffled arm keeps the same anchor POV but replaces
-the other nine POVs with same-split, different-match distractors.  This holds
-feature count and probe capacity fixed while destroying synchronization.
+Two preregistered feature modes are supported:
+
+``input-grouping``
+    All arms use one frozen video encoder.  The shuffled arm keeps the same
+    anchor POV but replaces the other nine embeddings with same-split,
+    different-match distractors.  This tests whether synchronized observations
+    contain predictive information before world-model training.
+
+``checkpoint-representations``
+    Each arm reads causal context features from its corresponding frozen MIRA
+    checkpoint.  Synchronized and shuffled both receive the identical held-out
+    synchronized ten-POV context; the checkpoints differ only in their training
+    grouping.  This is the model-level synchronized-training control.
 """
 
 from __future__ import annotations
@@ -18,17 +27,22 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-
-os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
 from cs2_release.action_probe.train_multipov import MultiPovProbe, aggregate_features
 from cs2_release.core.embeddings import load_embedding_table
-from cs2_release.core.io import dataframe_sha256, git_commit, read_parquet, write_json
+from cs2_release.core.io import (
+    dataframe_sha256,
+    git_commit,
+    read_parquet,
+    sha256_file,
+    write_json,
+)
 from cs2_release.core.metrics import binary_auc, binary_average_precision
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 
 Arm = Literal["single", "synchronized", "shuffled"]
@@ -99,6 +113,7 @@ def build_arm_examples(
     split: str,
     arm: Arm,
     seed: int,
+    checkpoint_representations: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     """Build deterministic, one-example-per-target-window probe inputs."""
 
@@ -125,7 +140,7 @@ def build_arm_examples(
         selected_rows = [int(anchor_row["embedding_row_id"])]
         source_windows = [window_id]
 
-        if arm == "synchronized":
+        if arm == "synchronized" or (arm == "shuffled" and checkpoint_representations):
             selected_rows = group["embedding_row_id"].astype(int).tolist()
             source_windows = [window_id] * 10
         elif arm == "shuffled":
@@ -213,6 +228,7 @@ def _train_arm(
     target_cols: list[str],
     args: argparse.Namespace,
     device: torch.device,
+    checkpoint_representations: bool,
 ) -> tuple[dict, pd.DataFrame, dict]:
     built = {}
     for split, offset in (("train", 0), ("val", 10_000), ("test", 20_000)):
@@ -224,6 +240,7 @@ def _train_arm(
             split=split,
             arm=arm,
             seed=seed + offset,
+            checkpoint_representations=checkpoint_representations,
         )
     x_train, y_train, _ = built["train"]
     x_val, y_val, _ = built["val"]
@@ -321,7 +338,7 @@ def _train_arm(
         "arm": arm,
         "seed": seed,
         "examples": {
-            split: int(len(built[split][0])) for split in ("train", "val", "test")
+            split: len(built[split][0]) for split in ("train", "val", "test")
         },
         "best_val_macro_ap": float(best_score),
         "test": _metrics(y_test, probabilities, target_cols),
@@ -403,7 +420,7 @@ def paired_bootstrap(
     return {
         "definition": f"{left_name}_minus_{right_name}",
         "cluster_unit": "match_id",
-        "clusters": int(len(clusters)),
+        "clusters": len(clusters),
         "bootstrap_samples": int(samples),
         "observed": observed,
         "ci95": {
@@ -421,7 +438,17 @@ def paired_bootstrap(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", type=Path, required=True)
-    parser.add_argument("--embeddings", type=Path, required=True)
+    feature_source = parser.add_mutually_exclusive_group(required=True)
+    feature_source.add_argument(
+        "--embeddings",
+        type=Path,
+        help="One frozen encoder table for the input-grouping information control.",
+    )
+    feature_source.add_argument(
+        "--checkpoint-embeddings",
+        type=Path,
+        help="Directory containing single/, synchronized/, and shuffled/ MIRA feature tables.",
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--targets", nargs="+", default=None)
     parser.add_argument("--seeds", type=int, nargs="+", default=[17, 29, 43])
@@ -444,7 +471,36 @@ def main() -> int:
     torch.use_deterministic_algorithms(args.deterministic)
     torch.backends.cudnn.benchmark = not args.deterministic
     labels = read_parquet(args.labels)
-    embedding_index, embeddings = load_embedding_table(args.embeddings)
+    checkpoint_representations = args.checkpoint_embeddings is not None
+    if checkpoint_representations:
+        embedding_paths = {
+            arm: args.checkpoint_embeddings / arm
+            for arm in ARMS
+        }
+        embedding_tables = {
+            arm: load_embedding_table(path)
+            for arm, path in embedding_paths.items()
+        }
+        reference = embedding_tables["synchronized"][0][
+            ["eval_window_id", "sample_key", "pov_idx"]
+        ].reset_index(drop=True)
+        for arm, (index, embeddings) in embedding_tables.items():
+            observed = index[["eval_window_id", "sample_key", "pov_idx"]].reset_index(
+                drop=True
+            )
+            if not observed.equals(reference):
+                raise ValueError(
+                    f"{arm}: checkpoint representation index differs from synchronized"
+                )
+            if embeddings.shape[1] != embedding_tables["synchronized"][1].shape[1]:
+                raise ValueError(f"{arm}: checkpoint representation dimension drifted")
+    else:
+        embedding_paths = {arm: args.embeddings for arm in ARMS}
+        embedding_index, embeddings = load_embedding_table(args.embeddings)
+        embedding_tables = {
+            arm: (embedding_index, embeddings)
+            for arm in ARMS
+        }
     requested = args.targets or [
         column for column in labels.columns if column.startswith("target_")
     ]
@@ -477,15 +533,17 @@ def main() -> int:
     for seed in args.seeds:
         predictions: dict[str, pd.DataFrame] = {}
         for arm in ARMS:
+            arm_index, arm_embeddings = embedding_tables[arm]
             metrics, pred, state = _train_arm(
                 arm=arm,
                 seed=int(seed),
                 labels=labels,
-                embedding_index=embedding_index,
-                embeddings=embeddings,
+                embedding_index=arm_index,
+                embeddings=arm_embeddings,
                 target_cols=target_cols,
                 args=args,
                 device=device,
+                checkpoint_representations=checkpoint_representations,
             )
             arm_dir = args.out / f"seed_{seed}" / arm
             arm_dir.mkdir(parents=True, exist_ok=True)
@@ -515,23 +573,62 @@ def main() -> int:
     summary = {
         "schema": "cs1k-causal-future-event-probe-v1",
         "experimental_unit": "one context window from one match-disjoint split",
-        "arms": {
-            "single": "one deterministic anchor POV",
-            "synchronized": "all ten POVs from the target round and time",
-            "shuffled": (
-                "the same anchor plus nine same-split, different-match distractor POVs; "
-                "ten embeddings and identical probe capacity"
-            ),
-        },
+        "feature_mode": (
+            "checkpoint-representations"
+            if checkpoint_representations
+            else "input-grouping"
+        ),
+        "arms": (
+            {
+                "single": "one deterministic anchor from the frozen single-MIRA checkpoint",
+                "synchronized": (
+                    "all ten held-out synchronized POV features from the frozen "
+                    "synchronized-trained MIRA checkpoint"
+                ),
+                "shuffled": (
+                    "the identical ten held-out synchronized POVs represented by the frozen "
+                    "matched-information shuffled-trained MIRA checkpoint"
+                ),
+            }
+            if checkpoint_representations
+            else {
+                "single": "one deterministic anchor POV",
+                "synchronized": "all ten POVs from the target round and time",
+                "shuffled": (
+                    "the same anchor plus nine same-split, different-match distractor POVs; "
+                    "ten embeddings and identical probe capacity"
+                ),
+            }
+        ),
         "targets": target_cols,
         "excluded_targets": excluded,
         "seeds": [int(seed) for seed in args.seeds],
         "results": results,
         "paired_comparisons": comparisons,
         "labels_sha256": dataframe_sha256(labels),
-        "embedding_index_sha256": dataframe_sha256(embedding_index),
-        "embedding_rows": int(len(embedding_index)),
-        "embedding_dim": int(embeddings.shape[1]),
+        "embedding_sources": {
+            arm: {
+                "path": str(embedding_paths[arm]),
+                "embedding_index_sha256": dataframe_sha256(index),
+                "embedding_rows": len(index),
+                "embedding_dim": int(values.shape[1]),
+                "metadata_sha256": (
+                    sha256_file(embedding_paths[arm] / "metadata.json")
+                    if (embedding_paths[arm] / "metadata.json").is_file()
+                    else None
+                ),
+                "checkpoint_sha256": (
+                    json.loads(
+                        (embedding_paths[arm] / "metadata.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ).get("checkpoint_sha256")
+                    if (embedding_paths[arm] / "metadata.json").is_file()
+                    else None
+                ),
+            }
+            for arm, (index, values) in embedding_tables.items()
+        },
         "bootstrap_samples": int(args.bootstrap_samples),
         "deterministic_algorithms": bool(args.deterministic),
         "cublas_workspace_config": os.environ.get("CUBLAS_WORKSPACE_CONFIG"),

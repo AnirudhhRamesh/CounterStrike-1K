@@ -155,6 +155,26 @@ Context is `[start_frame, end_frame)` and labels are read strictly from
 `[end_frame, future_end_frame)`. Target inclusion is selected from training
 support only. Test uncertainty uses a paired match-cluster bootstrap.
 
+For the model-level control, first extract context-only representations from
+the frozen single, synchronized-trained, and matched-information
+shuffled-trained MIRA checkpoints into `single/`, `synchronized/`, and
+`shuffled/` subdirectories with MIRA's
+`scripts/extract_cs2_future_event_features.py`, then run:
+
+```bash
+uv run python -m cs2_release.future_events.train \
+  --labels runs/future_events/labels/future_event_labels.parquet \
+  --checkpoint-embeddings runs/future_events/mira_features \
+  --seeds 17 29 43 \
+  --bootstrap-samples 10000 \
+  --out runs/future_events/mira_probes
+```
+
+In this mode both ten-player checkpoints receive the exact same held-out
+synchronized contexts. Only their training grouping differs. The probe sees
+the last causal MIRA context representation; neither post-context frames nor
+post-context actions enter feature extraction.
+
 ## Sharded embedding extraction (multi-GPU)
 
 For larger encoders, split extraction across GPUs and merge:
