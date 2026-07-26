@@ -61,6 +61,44 @@ Midpoint true-target alignment separation is `+0.040302`, CI
 excluded. The first-death ARR result must not be described as a replication
 of the significant midpoint ARR result.
 
+An additive all-action resummary at code commit
+`b8d36e130796292c26cdb862cfae31cdea936e94` recomputes the original ARR
+results exactly from their hashed score/label arrays, then reports the same
+10,000-draw round bootstrap for every one of the 14 frozen action labels. It
+does not rerun or select the world model, backbone, or probe. Selected
+midpoint rows are shown below; the machine-readable addendum contains all
+labels.
+
+| Action label | True-target ARR | Shuffled-target ARR | Zero-target ARR | True - shuffled (95% CI) | Positive segments |
+|---|---:|---:|---:|---:|---:|
+| FIRE | 0.296 | 0.214 | 0.156 | +0.083 [-0.012, 0.202] | 291 |
+| RIGHTCLICK | 0.248 | 0.200 | 0.200 | +0.049 [0.006, 0.130] | 189 |
+| YAW_NEG | 0.710 | 0.576 | 0.620 | +0.134 [0.067, 0.193] | 1,263 |
+| YAW_POS | 0.691 | 0.614 | 0.657 | +0.078 [0.016, 0.137] | 1,119 |
+| RELOAD | 0.016 | 0.015 | 0.016 | +0.002 [-0.103, 0.513] | 15 |
+
+These per-label intervals are an exhaustive post-test diagnostic, not a new
+multiple-testing-corrected confirmatory endpoint. FIRE is directionally
+ordered and its true-versus-zero interval is positive
+(`[0.043, 0.250]`), but its true-versus-shuffled interval overlaps zero.
+RELOAD has only 15 positive segments and is explicitly unsupported. The
+predeclared macro separation above and RAFT motion endpoint remain the
+inferential claims.
+
+Reproduce the additive table without visual rescoring:
+
+```bash
+python -m cs2_train.scripts.resummarize_rollout_arr \
+  /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k/midpoint/action_recoverability \
+  --sample-plan /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k/midpoint/sample_plan.json \
+  --output /runs/diamond-cs1k-dust2-360p-rebuttal-v2/evaluation_20k/midpoint/action_recoverability/per_action_addendum.json
+```
+
+The real midpoint addendum SHA-256 is
+`d0aeb93e8cc2353b675c062acdd949d6b26c4c93ee60a64d7715f8e1d632e69e`;
+the first-death addendum SHA-256 is
+`66ddb1a93e84bafa4c6272020b1d5e47abc243abd3844da6f9c641fdbf9b9589`.
+
 The ARR-extended independent audit is public at commit
 `d138f57707cb15fc0ee5ecf0d5023cdb360bbd8d`. It rehashes the checkpoint,
 both rollout archives, all pixel/RAFT rows, the probe and train/validation
