@@ -99,3 +99,9 @@ def test_arr_detects_true_alignment_and_shuffled_redirection() -> None:
     assert summary["modes"]["shuffled"]["macro_own_conditioning_arr"] == 1.0
     assert summary["primary"]["true_target_alignment_separation"]["estimate"] > 0
     assert summary["primary"]["shuffled_action_redirection"]["estimate"] > 0
+    for action_name in ACTION_LABEL_NAMES:
+        event = summary["per_class_primary"][action_name]
+        assert event["true_target_arr"] == 1.0
+        assert event["true_minus_shuffled_target_alignment"]["estimate"] > 0
+        assert event["true_minus_shuffled_target_alignment"]["ci95"][0] > 0
+        assert event["true_minus_zero_target_alignment"]["estimate"] > 0

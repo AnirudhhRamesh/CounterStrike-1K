@@ -318,6 +318,7 @@ def summarize_arr(
 
     mode_results = {}
     bootstrap_mode = {}
+    bootstrap_per_class_mode = {}
     eval_seeds = generated_scores.shape[0]
     for mode_index, mode in enumerate(action_modes):
         generated = (
@@ -392,9 +393,15 @@ def summarize_arr(
             ],
             axis=1,
         )
+        own_arr_bootstrap = ratio(own_ap_bootstrap, real_ap_bootstrap)
+        true_target_arr_bootstrap = ratio(true_ap_bootstrap, real_ap_bootstrap)
         bootstrap_mode[mode] = {
-            "own": nanmean_rows(ratio(own_ap_bootstrap, real_ap_bootstrap)),
-            "true_target": nanmean_rows(ratio(true_ap_bootstrap, real_ap_bootstrap)),
+            "own": nanmean_rows(own_arr_bootstrap),
+            "true_target": nanmean_rows(true_target_arr_bootstrap),
+        }
+        bootstrap_per_class_mode[mode] = {
+            "own": own_arr_bootstrap,
+            "true_target": true_target_arr_bootstrap,
         }
 
     primary_draws = {
@@ -452,6 +459,61 @@ def summarize_arr(
             ],
             "finite_bootstrap_replicates": len(finite),
         }
+
+    per_class_primary = {}
+    for class_index, class_name in enumerate(ACTION_LABEL_NAMES):
+        true_result = mode_results["true"]["per_class"][class_name]
+        shuffled_result = mode_results["shuffled"]["per_class"][class_name]
+        comparisons = (
+            (
+                "true_minus_shuffled_target_alignment",
+                shuffled_result,
+                bootstrap_per_class_mode["shuffled"]["true_target"][:, class_index],
+            ),
+            *(
+                (
+                    (
+                        "true_minus_zero_target_alignment",
+                        mode_results["zeros"]["per_class"][class_name],
+                        bootstrap_per_class_mode["zeros"]["true_target"][:, class_index],
+                    ),
+                )
+                if "zeros" in bootstrap_per_class_mode
+                else ()
+            ),
+        )
+        class_summary = {
+            "true_target_arr": true_result["true_target_arr"],
+            "shuffled_target_arr": shuffled_result["true_target_arr"],
+            "true_positive_examples": true_result["true_positive_examples"],
+        }
+        true_draws = bootstrap_per_class_mode["true"]["true_target"][:, class_index]
+        for comparison_name, reference_result, reference_draws in comparisons:
+            true_estimate = true_result["true_target_arr"]
+            reference_estimate = reference_result["true_target_arr"]
+            estimate = (
+                true_estimate - reference_estimate
+                if true_estimate is not None and reference_estimate is not None
+                else None
+            )
+            draws = true_draws - reference_draws
+            finite = draws[np.isfinite(draws)]
+            class_summary[comparison_name] = {
+                "estimate": estimate,
+                "ci95": (
+                    [
+                        float(np.quantile(finite, 0.025)),
+                        float(np.quantile(finite, 0.975)),
+                    ]
+                    if len(finite)
+                    else [None, None]
+                ),
+                "finite_bootstrap_replicates": len(finite),
+            }
+            if comparison_name == "true_minus_zero_target_alignment":
+                class_summary["zero_target_arr"] = reference_estimate
+        per_class_primary[class_name] = class_summary
+
     return {
         "real_ceiling_per_class_average_precision": {
             name: json_number(real_ap[index])
@@ -459,6 +521,7 @@ def summarize_arr(
         },
         "modes": mode_results,
         "primary": primary,
+        "per_class_primary": per_class_primary,
         "bootstrap": {
             "unit": "round_id",
             "seed": bootstrap_seed,
