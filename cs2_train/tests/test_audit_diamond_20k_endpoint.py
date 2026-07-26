@@ -124,6 +124,62 @@ def test_audit_endpoint_accepts_complete_hashed_grid(tmp_path: Path) -> None:
     assert audit["windows"]["first-death"]["round_clusters"] == 2
 
 
+def test_audit_endpoint_accepts_hashed_action_recoverability(tmp_path: Path) -> None:
+    make_endpoint(tmp_path)
+    probe = tmp_path / "probe.pt"
+    probe.write_bytes(b"frozen-probe")
+    for window in ("midpoint", "first-death"):
+        evaluation = tmp_path / window
+        summary = json.loads((evaluation / "summary.json").read_text(encoding="utf-8"))
+        archive_metadata = evaluation / "rollout_archive" / "metadata.json"
+        arr_dir = evaluation / "action_recoverability"
+        scores = arr_dir / "scores.bin"
+        scores.parent.mkdir(parents=True)
+        scores.write_bytes(f"{window}-scores".encode())
+        write_json(
+            arr_dir / "summary.json",
+            {
+                "status": "complete",
+                "archive_metadata_sha256": sha256(archive_metadata),
+                "sample_plan_sha256": summary["sample_plan_sha256"],
+                "probe_checkpoint_sha256": sha256(probe),
+                "num_samples": 2,
+                "num_complete_segments": 4,
+                "num_incomplete_segments_excluded": 0,
+                "eval_seeds": [37],
+                "action_modes": ["true", "shuffled"],
+                "results": {
+                    "primary": {"true_target_alignment_separation": {"estimate": 0.1}},
+                    "bootstrap": {
+                        "unit": "round_id",
+                        "round_clusters": 2,
+                        "replicates": 10_000,
+                    },
+                },
+                "artifacts": {
+                    "scores": {
+                        "path": scores.name,
+                        "sha256": sha256(scores),
+                        "dtype": "float32",
+                        "shape": [1],
+                    }
+                },
+            },
+        )
+
+    audit = audit_endpoint(
+        tmp_path,
+        expected_samples=2,
+        expected_rounds=2,
+        expected_eval_seeds=(37,),
+        expected_action_modes=("true", "shuffled"),
+        probe_checkpoint=probe,
+    )
+    arr = audit["windows"]["midpoint"]["action_recoverability"]
+    assert arr["probe_checkpoint_sha256"] == sha256(probe)
+    assert arr["complete_segments"] == 4
+
+
 def test_audit_endpoint_rejects_archive_corruption(tmp_path: Path) -> None:
     make_endpoint(tmp_path)
     (tmp_path / "midpoint" / "rollout_archive" / "payload.bin").write_bytes(b"corrupt")

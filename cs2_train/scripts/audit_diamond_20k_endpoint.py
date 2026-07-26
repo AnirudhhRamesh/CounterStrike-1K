@@ -102,6 +102,7 @@ def audit_endpoint(
     expected_eval_seeds: tuple[int, ...] = (37, 41, 43),
     expected_action_modes: tuple[str, ...] = ("true", "shuffled", "zeros"),
     checkpoint: Path | None = None,
+    probe_checkpoint: Path | None = None,
 ) -> dict[str, Any]:
     endpoint_root = endpoint_root.resolve()
     if not (endpoint_root / "COMPLETE").is_file():
@@ -232,7 +233,7 @@ def audit_endpoint(
         assert_finite_tree(motion.get("means"), label=f"{window}.motion.means")
         assert_finite_tree(motion.get("paired_deltas"), label=f"{window}.motion.paired_deltas")
 
-        windows[window] = {
+        window_audit = {
             "summary_sha256": sha256_file(summary_path),
             "motion_summary_sha256": sha256_file(motion_path),
             "archive_metadata_sha256": archive_metadata_sha256,
@@ -242,6 +243,72 @@ def audit_endpoint(
             "round_clusters": len(metric_rounds),
             "artifacts": artifact_audit,
         }
+        if probe_checkpoint is not None:
+            arr_path = evaluation / "action_recoverability" / "summary.json"
+            arr = load_json(arr_path)
+            if arr.get("status") != "complete":
+                raise ValueError(f"{window} action-recoverability status is not complete")
+            actual_probe_sha256 = sha256_file(probe_checkpoint)
+            arr_contract = {
+                "archive_metadata_sha256": archive_metadata_sha256,
+                "sample_plan_sha256": summary["sample_plan_sha256"],
+                "probe_checkpoint_sha256": actual_probe_sha256,
+                "num_samples": expected_samples,
+                "eval_seeds": list(expected_eval_seeds),
+                "action_modes": list(expected_action_modes),
+            }
+            for field, expected in arr_contract.items():
+                actual = arr.get(field)
+                if actual != expected:
+                    raise ValueError(
+                        f"{window} action recoverability {field}={actual!r}, expected {expected!r}"
+                    )
+            bootstrap = arr.get("results", {}).get("bootstrap", {})
+            if (
+                bootstrap.get("unit") != "round_id"
+                or bootstrap.get("round_clusters") != expected_rounds
+                or bootstrap.get("replicates") != 10_000
+            ):
+                raise ValueError(
+                    f"{window} action-recoverability bootstrap contract is invalid: {bootstrap}"
+                )
+            arr_artifacts = arr.get("artifacts")
+            if not isinstance(arr_artifacts, dict) or not arr_artifacts:
+                raise ValueError(f"{window} action-recoverability artifacts are absent")
+            arr_artifact_audit = {}
+            for name, record in arr_artifacts.items():
+                if not isinstance(record, dict) or not isinstance(record.get("path"), str):
+                    raise TypeError(f"{window} invalid action-recoverability artifact: {name}")
+                artifact_path = arr_path.parent / record["path"]
+                if artifact_path.parent.resolve() != arr_path.parent.resolve():
+                    raise ValueError(
+                        f"{window} action-recoverability artifact escapes result directory: "
+                        f"{artifact_path}"
+                    )
+                digest = sha256_file(artifact_path)
+                if digest != record.get("sha256"):
+                    raise ValueError(
+                        f"{window} action-recoverability artifact hash mismatch: {artifact_path}"
+                    )
+                arr_artifact_audit[name] = {
+                    "path": record["path"],
+                    "size_bytes": artifact_path.stat().st_size,
+                    "sha256": digest,
+                    "dtype": record.get("dtype"),
+                    "shape": record.get("shape"),
+                }
+            assert_finite_tree(
+                arr.get("results", {}).get("primary"),
+                label=f"{window}.action_recoverability.primary",
+            )
+            window_audit["action_recoverability"] = {
+                "summary_sha256": sha256_file(arr_path),
+                "probe_checkpoint_sha256": actual_probe_sha256,
+                "complete_segments": arr.get("num_complete_segments"),
+                "incomplete_segments_excluded": arr.get("num_incomplete_segments_excluded"),
+                "artifacts": arr_artifact_audit,
+            }
+        windows[window] = window_audit
 
     first = summaries[WINDOW_MODES[0]]
     for window in WINDOW_MODES[1:]:
@@ -279,6 +346,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--endpoint-root", required=True, type=Path)
     parser.add_argument("--checkpoint", type=Path)
+    parser.add_argument("--probe-checkpoint", type=Path)
     parser.add_argument("--expected-step", type=int, default=20_000)
     parser.add_argument("--expected-samples", type=int, default=690)
     parser.add_argument("--expected-rounds", type=int, default=69)
@@ -299,6 +367,7 @@ def main() -> None:
         expected_eval_seeds=tuple(args.eval_seeds),
         expected_action_modes=tuple(args.action_modes),
         checkpoint=args.checkpoint,
+        probe_checkpoint=args.probe_checkpoint,
     )
     rendered = json.dumps(audit, indent=2, sort_keys=True) + "\n"
     if args.output is not None:
