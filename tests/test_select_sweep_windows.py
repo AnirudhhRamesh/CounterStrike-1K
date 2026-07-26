@@ -22,7 +22,7 @@ def test_selects_exact_query_candidate_union(tmp_path) -> None:
     pairs_root = tmp_path / "pairs"
     pairs_root.mkdir()
     (pairs_root / "protocol_sweep.json").write_text(
-        json.dumps({"status": "pass"}),
+        json.dumps({"status": "pass", "cells": {"cell": {}}}),
         encoding="utf-8",
     )
     pd.DataFrame([
@@ -39,6 +39,10 @@ def test_selects_exact_query_candidate_union(tmp_path) -> None:
             "candidate_pov_idx": 4,
         },
     ]).to_parquet(pairs_root / "cell.parquet", index=False)
+    pd.DataFrame({"auxiliary": [1]}).to_parquet(
+        pairs_root / "positioned_windows.parquet",
+        index=False,
+    )
     selected, metadata = select_sweep_windows(
         windows,
         pairs_roots=[pairs_root],

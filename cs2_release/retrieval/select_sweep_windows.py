@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -23,11 +24,18 @@ def select_sweep_windows(
         contract_path = root / "protocol_sweep.json"
         if not contract_path.exists():
             raise FileNotFoundError(contract_path)
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        cells = contract.get("cells")
+        if not isinstance(cells, dict) or not cells:
+            raise ValueError(f"{contract_path}: missing non-empty cells mapping")
         contracts.append({
             "path": str(contract_path),
             "sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest(),
         })
-        for pair_path in sorted(root.glob("*.parquet")):
+        for cell_name in sorted(cells):
+            pair_path = root / f"{cell_name}.parquet"
+            if not pair_path.exists():
+                raise FileNotFoundError(pair_path)
             pairs = read_parquet(pair_path)
             pair_rows += len(pairs)
             referenced.update(zip(

@@ -271,10 +271,10 @@ def evaluate_sweep(
 
     cell_records = []
     all_query_metrics = []
-    for pair_path in sorted(pairs_root.glob("*.parquet")):
-        cell_name = pair_path.stem
-        if cell_name not in contract["cells"]:
-            raise ValueError(f"{pair_path}: missing cell metadata")
+    for cell_name in sorted(contract["cells"]):
+        pair_path = pairs_root / f"{cell_name}.parquet"
+        if not pair_path.exists():
+            raise FileNotFoundError(pair_path)
         pairs = read_parquet(pair_path)
         expected_hash = contract["cells"][cell_name]["pairs_sha256"]
         actual_hash = dataframe_sha256(pairs)
