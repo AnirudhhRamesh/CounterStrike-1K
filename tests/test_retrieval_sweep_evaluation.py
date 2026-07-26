@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from cs2_release.retrieval.evaluate_protocol_sweep import score_pairs
+from cs2_release.retrieval.evaluate_protocol_sweep import _aggregate_cells, score_pairs
 
 
 def _index() -> pd.DataFrame:
@@ -57,3 +57,32 @@ def test_ties_are_not_broken_by_candidate_row_order() -> None:
     assert row["top5"] == 1.0
     assert row["mrr"] == 0.75
     assert row["positive_rank"] == 1.5
+
+
+def test_spatial_radius_is_retained_as_an_aggregate_dimension() -> None:
+    rows = []
+    for radius, top1 in [(400.0, 1.0), (800.0, 0.0)]:
+        for seed in [17, 29]:
+            rows.append({
+                "sweep_query_id": "q0",
+                "query_match_id": "m0",
+                "map_slug": "dust2",
+                "hard_negative_policy": "same_location_wrong_time",
+                "pair_sampling_seed": seed,
+                "declared_candidates": 2,
+                "spatial_radius": radius,
+                "top1": top1,
+                "top5": 1.0,
+                "mrr": 0.5 + 0.5 * top1,
+                "positive_rank": 2.0 - top1,
+                "top1_lift_over_chance": 2.0 * top1 - 1.0,
+                "tied": 1,
+            })
+    aggregate, per_map = _aggregate_cells(
+        pd.DataFrame(rows),
+        bootstrap_samples=20,
+        bootstrap_seed=123,
+    )
+    assert [row["spatial_radius"] for row in aggregate] == [400.0, 800.0]
+    assert [row["top1"] for row in aggregate] == [1.0, 0.0]
+    assert [row["spatial_radius"] for row in per_map] == [400.0, 800.0]

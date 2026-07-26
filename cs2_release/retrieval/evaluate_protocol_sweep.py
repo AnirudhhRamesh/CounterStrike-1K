@@ -72,14 +72,17 @@ def score_pairs(
         .groupby("candidate_set_id", sort=False)
         .first()
     )
-    summary = first[[
+    summary_columns = [
         "sweep_query_id",
         "query_match_id",
         "map_slug",
         "hard_negative_policy",
         "pair_sampling_seed",
         "declared_candidates",
-    ]].join(tie_counts)
+    ]
+    if "spatial_radius" in first.columns:
+        summary_columns.append("spatial_radius")
+    summary = first[summary_columns].join(tie_counts)
     greater = summary["greater"].to_numpy(dtype=np.int64)
     tied = summary["tied"].to_numpy(dtype=np.int64)
     summary["top1"] = _tie_hit_probability(greater, tied, 1)
@@ -123,7 +126,11 @@ def _aggregate_cells(
     aggregate_records = []
     per_map_records = []
     group_columns = ["hard_negative_policy", "declared_candidates"]
-    for (policy, candidates), group in query_metrics.groupby(group_columns, sort=True):
+    if "spatial_radius" in query_metrics.columns:
+        group_columns.append("spatial_radius")
+    for group_key, group in query_metrics.groupby(group_columns, sort=True):
+        key_values = group_key if isinstance(group_key, tuple) else (group_key,)
+        group_values = dict(zip(group_columns, key_values, strict=True))
         averaged = (
             group.groupby(
                 ["sweep_query_id", "query_match_id", "map_slug"],
@@ -133,14 +140,16 @@ def _aggregate_cells(
             .mean()
         )
         record = {
-            "hard_negative_policy": str(policy),
-            "candidate_count": int(candidates),
+            "hard_negative_policy": str(group_values["hard_negative_policy"]),
+            "candidate_count": int(group_values["declared_candidates"]),
             "pair_sampling_seeds": int(group["pair_sampling_seed"].nunique()),
             **_metric_record(group),
             "queries": len(averaged),
             "matches": int(averaged["query_match_id"].nunique()),
             "maps": int(averaged["map_slug"].nunique()),
         }
+        if "spatial_radius" in group_values:
+            record["spatial_radius"] = float(group_values["spatial_radius"])
         record.update(
             cluster_bootstrap_column_means(
                 averaged,
@@ -153,8 +162,8 @@ def _aggregate_cells(
         aggregate_records.append(record)
         for map_slug, map_group in averaged.groupby("map_slug", sort=True):
             per_map_records.append({
-                "hard_negative_policy": str(policy),
-                "candidate_count": int(candidates),
+                "hard_negative_policy": str(group_values["hard_negative_policy"]),
+                "candidate_count": int(group_values["declared_candidates"]),
                 "map_slug": str(map_slug),
                 "queries": len(map_group),
                 **{
@@ -162,6 +171,10 @@ def _aggregate_cells(
                     for metric in QUERY_METRICS
                 },
             })
+            if "spatial_radius" in group_values:
+                per_map_records[-1]["spatial_radius"] = float(
+                    group_values["spatial_radius"]
+                )
     return aggregate_records, per_map_records
 
 
@@ -173,7 +186,12 @@ def _paired_policy_contrasts(
 ) -> list[dict]:
     contrasts = []
     policies = sorted(query_metrics["hard_negative_policy"].unique())
-    for candidates, count_group in query_metrics.groupby("declared_candidates", sort=True):
+    count_columns = ["declared_candidates"]
+    if "spatial_radius" in query_metrics.columns:
+        count_columns.append("spatial_radius")
+    for count_key, count_group in query_metrics.groupby(count_columns, sort=True):
+        count_values = count_key if isinstance(count_key, tuple) else (count_key,)
+        count_metadata = dict(zip(count_columns, count_values, strict=True))
         averaged = (
             count_group.groupby(
                 [
@@ -210,12 +228,14 @@ def _paired_policy_contrasts(
                 for metric in QUERY_METRICS:
                     delta[metric] = complete[(metric, right)] - complete[(metric, left)]
                 record = {
-                    "candidate_count": int(candidates),
+                    "candidate_count": int(count_metadata["declared_candidates"]),
                     "left_policy": str(left),
                     "right_policy": str(right),
                     "direction": "right_minus_left",
                     "paired_queries": len(delta),
                 }
+                if "spatial_radius" in count_metadata:
+                    record["spatial_radius"] = float(count_metadata["spatial_radius"])
                 for metric in QUERY_METRICS:
                     record[metric] = float(delta[metric].mean())
                 record.update(
@@ -264,12 +284,15 @@ def evaluate_sweep(
         predictions.to_parquet(predictions_root / pair_path.name, index=False)
         query_metrics["cell_name"] = cell_name
         all_query_metrics.append(query_metrics)
-        cell_records.append({
+        cell_record = {
             "cell_name": cell_name,
             "pair_sampling_seed": int(query_metrics["pair_sampling_seed"].iloc[0]),
             "hard_negative_policy": str(query_metrics["hard_negative_policy"].iloc[0]),
             **_metric_record(query_metrics),
-        })
+        }
+        if "spatial_radius" in query_metrics.columns:
+            cell_record["spatial_radius"] = float(query_metrics["spatial_radius"].iloc[0])
+        cell_records.append(cell_record)
 
     query_table = pd.concat(all_query_metrics, ignore_index=True)
     aggregate, per_map = _aggregate_cells(
